@@ -102,6 +102,8 @@ test('Codex live usage reads auth.json, sends safe headers, and parses windows',
   assert.equal(result.usage?.weekAvailable, true);
   assert.equal(result.usage?.h5Pct, 7);
   assert.equal(result.usage?.weekPct, 53);
+  assert.equal(result.usage?.h5LimitReached, false);
+  assert.equal(result.usage?.weekLimitReached, false);
   assert.equal(result.usage?.plan, 'pro');
   assert.equal(result.usage?.credits?.balance, '12.34');
   assert.equal(lastRequestOptions.hostname, 'chatgpt.com');
@@ -112,7 +114,32 @@ test('Codex live usage reads auth.json, sends safe headers, and parses windows',
   assert.equal(JSON.stringify(result.status).includes('test-access-token'), false);
 });
 
-test('Codex limit_reached overrides stale percentages from the live response', async () => {
+test('Codex global limit_reached does not override unrelated weekly window', async () => {
+  makeTempCodexHome({
+    tokens: {
+      access_token: 'test-access-token',
+    },
+  });
+  const nowSec = Math.floor(Date.now() / 1000);
+  withHttpResponse(200, {
+    rate_limit: {
+      primary_window: { used_percent: 9, remaining_percent: 0, reset_at: nowSec + 3600, limit_window_seconds: 18_000 },
+      secondary_window: { used_percent: 100, remaining_percent: 22, reset_at: nowSec + 604_800, limit_window_seconds: 604_800 },
+      limit_reached: true,
+    },
+  });
+
+  const result = await fetchCodexUsagePct();
+
+  assert.equal(result.status.code, 'ok');
+  assert.equal(result.usage?.limitReached, true);
+  assert.equal(result.usage?.h5Pct, 100);
+  assert.equal(result.usage?.weekPct, 78);
+  assert.equal(result.usage?.h5LimitReached, true);
+  assert.equal(result.usage?.weekLimitReached, false);
+});
+
+test('Codex clear reached type only marks the matching 5h window', async () => {
   makeTempCodexHome({
     tokens: {
       access_token: 'test-access-token',
@@ -123,7 +150,7 @@ test('Codex limit_reached overrides stale percentages from the live response', a
     rate_limit: {
       primary_window: { used_percent: 9, reset_at: nowSec + 3600, limit_window_seconds: 18_000 },
       secondary_window: { used_percent: 17, reset_at: nowSec + 604_800, limit_window_seconds: 604_800 },
-      limit_reached: true,
+      rate_limit_reached_type: 'primary_window',
     },
   });
 
@@ -132,7 +159,55 @@ test('Codex limit_reached overrides stale percentages from the live response', a
   assert.equal(result.status.code, 'ok');
   assert.equal(result.usage?.limitReached, true);
   assert.equal(result.usage?.h5Pct, 100);
-  assert.equal(result.usage?.weekPct, 100);
+  assert.equal(result.usage?.weekPct, 17);
+  assert.equal(result.usage?.h5LimitReached, true);
+  assert.equal(result.usage?.weekLimitReached, false);
+});
+
+test('Codex ambiguous reached type is metadata only', async () => {
+  makeTempCodexHome({
+    tokens: {
+      access_token: 'test-access-token',
+    },
+  });
+  const nowSec = Math.floor(Date.now() / 1000);
+  withHttpResponse(200, {
+    rate_limit_reached_type: 'rate_limit_reached',
+    rate_limit: {
+      primary_window: { used_percent: 9, reset_at: nowSec + 3600, limit_window_seconds: 18_000 },
+      secondary_window: { used_percent: 17, reset_at: nowSec + 604_800, limit_window_seconds: 604_800 },
+    },
+  });
+
+  const result = await fetchCodexUsagePct();
+
+  assert.equal(result.status.code, 'ok');
+  assert.equal(result.usage?.limitReached, true);
+  assert.equal(result.usage?.h5Pct, 9);
+  assert.equal(result.usage?.weekPct, 17);
+  assert.equal(result.usage?.h5LimitReached, false);
+  assert.equal(result.usage?.weekLimitReached, false);
+});
+
+test('Codex remaining percentage takes precedence over used percentage aliases', async () => {
+  makeTempCodexHome({
+    tokens: {
+      access_token: 'test-access-token',
+    },
+  });
+  const nowSec = Math.floor(Date.now() / 1000);
+  withHttpResponse(200, {
+    rate_limit: {
+      primary_window: { used_percentage: 3, remaining_percentage: 25, reset_at: nowSec + 3600, limit_window_seconds: 18_000 },
+      secondary_window: { used_percent: 91, remaining_percent: 60, reset_at: nowSec + 604_800, limit_window_seconds: 604_800 },
+    },
+  });
+
+  const result = await fetchCodexUsagePct();
+
+  assert.equal(result.status.code, 'ok');
+  assert.equal(result.usage?.h5Pct, 75);
+  assert.equal(result.usage?.weekPct, 40);
 });
 
 test('Codex usage fetcher returns local-log status when auth is missing', async () => {
@@ -174,6 +249,8 @@ test('stored Codex usage cache is rejected after auth file changes', () => {
     weekPct: 17,
     h5ResetMs: 60_000,
     weekResetMs: 120_000,
+    h5LimitReached: false,
+    weekLimitReached: false,
     plan: 'pro',
     credits: null,
     limitReached: false,
@@ -184,4 +261,6 @@ test('stored Codex usage cache is rejected after auth file changes', () => {
   const normalized = normalizeStoredCodexUsagePct(cached, 123);
   assert.equal(normalized?.h5Pct, 5);
   assert.equal(normalized?.weekPct, 17);
+  assert.equal(normalized?.h5LimitReached, false);
+  assert.equal(normalized?.weekLimitReached, false);
 });

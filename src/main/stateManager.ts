@@ -179,6 +179,8 @@ function ageCodexUsageSample(sample: CodexUsagePct, elapsedMs: number): CodexUsa
     weekPct: weekExpired ? 0 : sample.weekPct,
     h5ResetMs: h5Expired ? null : ageResetMs(sample.h5ResetMs, elapsedMs),
     weekResetMs: weekExpired ? null : ageResetMs(sample.weekResetMs, elapsedMs),
+    h5LimitReached: !h5Expired && sample.h5LimitReached,
+    weekLimitReached: !weekExpired && sample.weekLimitReached,
     limitReached: sample.limitReached && (!h5Expired || !weekExpired),
   };
 }

@@ -3,7 +3,7 @@ import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
 
-export const CODEX_USAGE_CACHE_SCHEMA_VERSION = 1;
+export const CODEX_USAGE_CACHE_SCHEMA_VERSION = 2;
 export const CODEX_USAGE_MAX_BACKOFF_MS = 600_000;
 
 const CODEX_DEFAULT_BASE_URL = 'https://chatgpt.com/backend-api';
@@ -36,6 +36,8 @@ export interface CodexUsagePct {
   weekPct: number;
   h5ResetMs: CodexResetMs;
   weekResetMs: CodexResetMs;
+  h5LimitReached: boolean;
+  weekLimitReached: boolean;
   plan: string;
   credits: CodexCreditsSnapshot | null;
   limitReached: boolean;
@@ -75,6 +77,8 @@ interface ParsedUsageWindow {
   resetMs: CodexResetMs;
   windowMinutes: number | null;
 }
+
+type CodexLimitWindowRole = 'h5' | 'week' | 'unknown';
 
 class HttpResponseError extends Error {
   statusCode: number;
@@ -341,10 +345,10 @@ function numericValue(value: unknown): number | null {
 }
 
 function pctFromWindow(window: Record<string, unknown>): number | null {
-  const usedPercent = numericValue(window.used_percent);
-  if (usedPercent != null) return normalizePct(usedPercent);
-  const remainingPercent = numericValue(window.remaining_percent);
+  const remainingPercent = numericValue(window.remaining_percent) ?? numericValue(window.remaining_percentage);
   if (remainingPercent != null) return normalizePct(100 - remainingPercent);
+  const usedPercent = numericValue(window.used_percent) ?? numericValue(window.used_percentage);
+  if (usedPercent != null) return normalizePct(usedPercent);
   const utilization = numericValue(window.utilization);
   if (utilization == null) return null;
   return normalizePct(utilization <= 1 ? utilization * 100 : utilization);
@@ -382,12 +386,15 @@ function parseUsageWindow(value: unknown, now: number): ParsedUsageWindow | null
   };
 }
 
-function roleForWindow(window: ParsedUsageWindow | null): 'session' | 'weekly' | 'unknown' {
-  const minutes = window?.windowMinutes;
+function roleForWindowMinutes(minutes: number | null | undefined): CodexLimitWindowRole {
   if (minutes == null) return 'unknown';
-  if (minutes >= 240 && minutes <= 360) return 'session';
-  if (minutes >= 9_000 && minutes <= 11_000) return 'weekly';
+  if (minutes >= 240 && minutes <= 360) return 'h5';
+  if (minutes >= 9_000 && minutes <= 11_000) return 'week';
   return 'unknown';
+}
+
+function roleForWindow(window: ParsedUsageWindow | null): CodexLimitWindowRole {
+  return roleForWindowMinutes(window?.windowMinutes);
 }
 
 function normalizeWindowRoles(rateLimit: Record<string, unknown> | null, now: number): { h5: ParsedUsageWindow | null; week: ParsedUsageWindow | null } {
@@ -398,17 +405,17 @@ function normalizeWindowRoles(rateLimit: Record<string, unknown> | null, now: nu
   const secondaryRole = roleForWindow(secondary);
 
   if (primary && secondary) {
-    if (primaryRole === 'weekly' && secondaryRole !== 'weekly') return { h5: secondary, week: primary };
-    if (secondaryRole === 'weekly') return { h5: primary, week: secondary };
+    if (primaryRole === 'week' && secondaryRole !== 'week') return { h5: secondary, week: primary };
+    if (secondaryRole === 'week') return { h5: primary, week: secondary };
     return { h5: primary, week: secondary };
   }
 
   if (primary) {
-    return primaryRole === 'weekly' ? { h5: null, week: primary } : { h5: primary, week: null };
+    return primaryRole === 'week' ? { h5: null, week: primary } : { h5: primary, week: null };
   }
 
   if (secondary) {
-    return secondaryRole === 'weekly' ? { h5: null, week: secondary } : { h5: secondary, week: null };
+    return secondaryRole === 'week' ? { h5: null, week: secondary } : { h5: secondary, week: null };
   }
 
   return { h5: null, week: null };
@@ -437,6 +444,45 @@ function isReachedType(value: string | null): boolean {
   return normalized !== 'unknown' && normalized !== 'none';
 }
 
+function reachedRoleForType(value: string | null): CodexLimitWindowRole {
+  if (!value) return 'unknown';
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || normalized === 'unknown' || normalized === 'none') return 'unknown';
+  const compact = normalized.replace(/[\s_-]+/g, '');
+  const h5Matched = compact.includes('primary')
+    || compact === '5h'
+    || compact.includes('fivehour')
+    || compact.includes('5hour');
+  const weekMatched = compact.includes('secondary')
+    || compact === '1w'
+    || compact === '7d'
+    || compact.includes('week')
+    || compact.includes('weekly')
+    || compact.includes('sevenday')
+    || compact.includes('7day');
+  if (h5Matched === weekMatched) return 'unknown';
+  return h5Matched ? 'h5' : 'week';
+}
+
+function reachedRoleFromValues(values: unknown[]): CodexLimitWindowRole {
+  let reachedRole: CodexLimitWindowRole = 'unknown';
+  for (const value of values) {
+    const role = reachedRoleForType(rateLimitReachedType(value));
+    if (role === 'unknown') continue;
+    if (reachedRole !== 'unknown' && reachedRole !== role) return 'unknown';
+    reachedRole = role;
+  }
+  return reachedRole;
+}
+
+function firstReachedType(values: unknown[]): string | null {
+  for (const value of values) {
+    const reachedType = rateLimitReachedType(value);
+    if (reachedType) return reachedType;
+  }
+  return null;
+}
+
 function boolValue(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
 }
@@ -448,12 +494,22 @@ function parseUsagePayload(payload: unknown, now: number): CodexUsagePct | null 
   const source = status ?? root;
   const rateLimit = asRecord(source.rate_limit) ?? asRecord(root.rate_limit);
   const windows = normalizeWindowRoles(rateLimit, now);
-  const reachedType = rateLimitReachedType(source.rate_limit_reached_type ?? root.rate_limit_reached_type);
+  const reachedTypeValues = [
+    source.rate_limit_reached_type,
+    root.rate_limit_reached_type,
+    rateLimit?.rate_limit_reached_type,
+  ];
+  const reachedType = firstReachedType(reachedTypeValues);
+  const reachedRole = reachedRoleFromValues(reachedTypeValues);
+  const h5LimitReached = !!windows.h5 && (reachedRole === 'h5' || windows.h5.pct >= 100);
+  const weekLimitReached = !!windows.week && (reachedRole === 'week' || windows.week.pct >= 100);
   const limitReached = boolValue(rateLimit?.limit_reached) === true
     || boolValue(rateLimit?.allowed) === false
-    || isReachedType(reachedType);
-  const h5Pct = windows.h5 ? (limitReached ? 100 : windows.h5.pct) : 0;
-  const weekPct = windows.week ? (limitReached ? 100 : windows.week.pct) : 0;
+    || isReachedType(reachedType)
+    || h5LimitReached
+    || weekLimitReached;
+  const h5Pct = windows.h5 ? (h5LimitReached ? 100 : windows.h5.pct) : 0;
+  const weekPct = windows.week ? (weekLimitReached ? 100 : windows.week.pct) : 0;
 
   if (!windows.h5 && !windows.week) return null;
 
@@ -464,6 +520,8 @@ function parseUsagePayload(payload: unknown, now: number): CodexUsagePct | null 
     weekPct,
     h5ResetMs: windows.h5?.resetMs ?? null,
     weekResetMs: windows.week?.resetMs ?? null,
+    h5LimitReached,
+    weekLimitReached,
     plan: stringValue(source, 'plan_type') || stringValue(root, 'plan_type') || '',
     credits: creditsSnapshot(source.credits ?? root.credits),
     limitReached,
@@ -512,6 +570,8 @@ export function normalizeStoredCodexUsagePct(
     weekPct: normalizePct(record.weekPct),
     h5ResetMs: normalizeResetValue(record.h5ResetMs),
     weekResetMs: normalizeResetValue(record.weekResetMs),
+    h5LimitReached: record.h5LimitReached === true,
+    weekLimitReached: record.weekLimitReached === true,
     plan: typeof record.plan === 'string' ? record.plan : '',
     credits: normalizeCredits(record.credits),
     limitReached: record.limitReached === true,

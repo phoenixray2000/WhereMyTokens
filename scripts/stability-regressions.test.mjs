@@ -310,6 +310,8 @@ test('Codex live usage overrides stale local-log rate limits', () => {
     weekPct: 53,
     h5ResetMs: 30 * 60 * 1000,
     weekResetMs: 3 * 24 * 60 * 60 * 1000,
+    h5LimitReached: true,
+    weekLimitReached: false,
     plan: 'pro',
     credits: null,
     limitReached: true,
@@ -349,6 +351,8 @@ test('cached Codex live usage is used before local logs and ages after startup',
       weekPct: 17,
       h5ResetMs: 70_000,
       weekResetMs: 130_000,
+      h5LimitReached: false,
+      weekLimitReached: false,
       plan: 'pro',
       credits: null,
       limitReached: false,
@@ -365,6 +369,33 @@ test('cached Codex live usage is used before local logs and ages after startup',
   assert.equal(limits.codexWeek.source, 'cache');
 });
 
+test('legacy Codex live usage cache schema is discarded on startup', () => {
+  const authMtimeMs = withTempCodexAuth();
+  const store = makeStore({
+    _cachedCodexUsagePct: {
+      schemaVersion: CODEX_USAGE_CACHE_SCHEMA_VERSION - 1,
+      storedAt: Date.now() - 10_000,
+      authMtimeMs,
+      h5Available: true,
+      weekAvailable: true,
+      h5Pct: 100,
+      weekPct: 100,
+      h5ResetMs: 70_000,
+      weekResetMs: 130_000,
+      h5LimitReached: true,
+      weekLimitReached: true,
+      plan: 'pro',
+      credits: null,
+      limitReached: true,
+      rateLimitReachedType: 'rate_limit_reached',
+    },
+  });
+  const manager = new StateManager(store, () => {});
+
+  assert.equal(manager.codexUsagePct, null);
+  assert.equal(store.values._cachedCodexUsagePct, undefined);
+});
+
 test('expired Codex live cache falls back to fresh local-log windows', () => {
   const manager = new StateManager(makeStore(), () => {});
   const now = Date.now();
@@ -377,6 +408,8 @@ test('expired Codex live cache falls back to fresh local-log windows', () => {
     weekPct: 17,
     h5ResetMs: null,
     weekResetMs: null,
+    h5LimitReached: false,
+    weekLimitReached: false,
     plan: 'pro',
     credits: null,
     limitReached: false,
