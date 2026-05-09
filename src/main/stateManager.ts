@@ -17,6 +17,7 @@ import { normalizeGitCwdKey, normalizeGitPathKey, preferGitStats, repoKeyFromGit
 import { ActivityBreakdown, ActivityBreakdownKind, FileUsageSummary, SessionSnapshot } from './jsonlTypes';
 import { CodexAccountState, readCodexAccountState } from './codexAccount';
 import { appendDebugMemoryLog, collectRuntimeMemorySnapshot, isDebugInstrumentationEnabled } from './debugInstrumentation';
+import { getOAuthCredentialFileState } from './oauthRefresh';
 
 export interface SessionInfo extends DiscoveredSession {
   modelName: string;
@@ -267,7 +268,10 @@ export class StateManager {
   private apiError = '';
   private lastApiCallMs = 0;
   private apiBackoffMs = 0;
+  private lastOAuthCredentialMarker: string | null = null;
   private apiRequestSeq = 0;
+  private apiRecoveryTimer: NodeJS.Timeout | null = null;
+  private apiRecoveryRetryMs = StateManager.API_RECOVERY_RETRY_INITIAL_MS;
   private bridgeWatcher: BridgeWatcher;
   private liveSession: LiveSessionData | null = null;
   private jsonlCache = new JsonlCache();
@@ -286,6 +290,8 @@ export class StateManager {
   private watcherTargetCount = 0;
   private repoGitStatsLastRefresh = 0;
   private static readonly API_MIN_INTERVAL_MS = 180_000;
+  private static readonly API_RECOVERY_RETRY_INITIAL_MS = 30_000;
+  private static readonly API_RECOVERY_RETRY_MAX_MS = 300_000;
   private static readonly GIT_STATS_TTL_MS = 600_000;
   private static readonly FAST_REFRESH_VISIBLE_MS = 60_000;
   private static readonly HEAVY_REFRESH_VISIBLE_MS = 300_000;
@@ -439,6 +445,7 @@ export class StateManager {
     if (this.autoLimitTimer) clearInterval(this.autoLimitTimer);
     if (this.debugMemTimer) clearInterval(this.debugMemTimer);
     if (this.fastDebounce) clearTimeout(this.fastDebounce);
+    if (this.apiRecoveryTimer) clearTimeout(this.apiRecoveryTimer);
     if (this.historyWarmupTimer) clearTimeout(this.historyWarmupTimer);
     if (this.gitWarmupTimer) clearTimeout(this.gitWarmupTimer);
     this.watcher?.close();
@@ -635,10 +642,48 @@ export class StateManager {
     };
   }
 
+  private clearApiRecoveryRetry(): void {
+    if (this.apiRecoveryTimer) clearTimeout(this.apiRecoveryTimer);
+    this.apiRecoveryTimer = null;
+    this.apiRecoveryRetryMs = StateManager.API_RECOVERY_RETRY_INITIAL_MS;
+  }
+
+  private isTransientApiFailure(status: ClaudeApiStatus): boolean {
+    return status.code === 'network' || status.code === 'timeout' || status.code === 'http-error';
+  }
+
+  private scheduleApiRecoveryRetry(): void {
+    if (this.apiRecoveryTimer) return;
+    const delayMs = this.apiRecoveryRetryMs;
+    this.apiRecoveryRetryMs = Math.min(delayMs * 2, StateManager.API_RECOVERY_RETRY_MAX_MS);
+    this.apiRecoveryTimer = setTimeout(() => {
+      this.apiRecoveryTimer = null;
+      void this.heavyRefresh(true);
+    }, delayMs);
+  }
+
+  private consumeOAuthCredentialChange(): boolean {
+    const state = getOAuthCredentialFileState();
+    const marker = state.hasCredentials
+      ? [
+          state.mtimeMs ?? 'no-mtime',
+          state.size ?? 'no-size',
+          state.expiresAt ?? 'no-expiry',
+          state.hasAccessToken ? 'access' : 'no-access',
+          state.hasRefreshToken ? 'refresh' : 'no-refresh',
+        ].join(':')
+      : 'missing';
+    const changed = this.lastOAuthCredentialMarker !== null && this.lastOAuthCredentialMarker !== marker;
+    this.lastOAuthCredentialMarker = marker;
+    return changed;
+  }
+
   private async refreshApiUsagePct(force = false): Promise<boolean> {
     const now = Date.now();
+    const credentialsChanged = this.consumeOAuthCredentialChange();
+    if (credentialsChanged) this.apiBackoffMs = 0;
     const interval = Math.max(StateManager.API_MIN_INTERVAL_MS, this.apiBackoffMs);
-    if (!force && now - this.lastApiCallMs < interval) return false;
+    if (!force && !credentialsChanged && now - this.lastApiCallMs < interval) return false;
     this.lastApiCallMs = now;
     const requestSeq = ++this.apiRequestSeq;
     const result = await fetchApiUsagePct();
@@ -650,6 +695,7 @@ export class StateManager {
       this.apiUsagePct = mergedUsage;
       this.apiUsagePctStoredAt = Date.now();
       this.apiBackoffMs = 0;
+      this.clearApiRecoveryRetry();
       (this.store as unknown as Store<Record<string, unknown>>).set('_cachedApiPct', { ...mergedUsage, storedAt: this.apiUsagePctStoredAt });
       return true;
     }
@@ -657,7 +703,12 @@ export class StateManager {
     if (result.status.code === 'no-credentials') {
       this.apiUsagePct = null;
       this.apiUsagePctStoredAt = 0;
+      this.clearApiRecoveryRetry();
       (this.store as unknown as Store<Record<string, unknown>>).delete('_cachedApiPct');
+    }
+
+    if (this.isTransientApiFailure(result.status)) {
+      this.scheduleApiRecoveryRetry();
     }
 
     if (result.status.code === 'rate-limited') {
@@ -665,7 +716,7 @@ export class StateManager {
         ? Math.max(0, result.status.retryAfterMs)
         : Math.min(this.apiBackoffMs === 0 ? 120_000 : this.apiBackoffMs * 2, 600_000);
       this.apiError = `${result.status.detail} Retry in ${Math.max(1, Math.ceil(this.apiBackoffMs / 60000))}m.`;
-      this.apiStatusLabel = 'rate limited';
+      this.apiStatusLabel = result.status.label || 'rate limited';
     }
     return true;
   }

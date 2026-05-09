@@ -2,19 +2,43 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import https from 'node:https';
+import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 
 import rateLimitFetcher from '../dist/main/rateLimitFetcher.js';
+import oauthRefresh from '../dist/main/oauthRefresh.js';
 
 const { fetchApiUsagePct, normalizeStoredApiUsagePct } = rateLimitFetcher;
+const { __setOAuthRefreshPostForTest, __clearOAuthRefreshForTest } = oauthRefresh;
 
 const originalReadFileSync = fs.readFileSync;
 const originalRequest = https.request;
 const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
 let lastRequestOptions = null;
+let tempDirs = [];
 
-function withMockCredentials(expectedPath) {
+function makeTempConfigDir() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wmt-rate-limit-fetcher-'));
+  tempDirs.push(dir);
+  process.env.CLAUDE_CONFIG_DIR = dir;
+  return dir;
+}
+
+function writeRealCredentials(dir, claudeAiOauth = {}) {
+  fs.writeFileSync(path.join(dir, '.credentials.json'), JSON.stringify({
+    claudeAiOauth: {
+      accessToken: 'test-access-token',
+      refreshToken: 'test-refresh-token',
+      expiresAt: Date.now() + 7 * 60 * 60 * 1000,
+      rateLimitTier: 'max_5x',
+      subscriptionType: 'max',
+      ...claudeAiOauth,
+    },
+  }, null, 2));
+}
+
+function withMockCredentials(expectedPath, claudeAiOauth = {}) {
   fs.readFileSync = function patchedReadFileSync(target, ...args) {
     const filePath = String(target);
     if (filePath.endsWith('.credentials.json')) {
@@ -22,8 +46,11 @@ function withMockCredentials(expectedPath) {
       return JSON.stringify({
         claudeAiOauth: {
           accessToken: 'test-access-token',
+          refreshToken: 'test-refresh-token',
+          expiresAt: Date.now() + 7 * 60 * 60 * 1000,
           rateLimitTier: 'max_5x',
           subscriptionType: 'max',
+          ...claudeAiOauth,
         },
       });
     }
@@ -42,8 +69,15 @@ function withMissingCredentials() {
 }
 
 function withHttpResponse(statusCode, payload, headers = {}) {
+  withHttpResponses([{ statusCode, payload, headers }]);
+}
+
+function withHttpResponses(responses) {
+  let index = 0;
   https.request = function patchedRequest(options, callback) {
     lastRequestOptions = options;
+    const response = responses[Math.min(index, responses.length - 1)];
+    index += 1;
     const req = new EventEmitter();
     req.setTimeout = () => req;
     req.destroy = (error) => {
@@ -51,11 +85,11 @@ function withHttpResponse(statusCode, payload, headers = {}) {
     };
     req.end = () => {
       const res = new EventEmitter();
-      res.statusCode = statusCode;
-      res.headers = headers;
+      res.statusCode = response.statusCode;
+      res.headers = response.headers ?? {};
       callback(res);
       process.nextTick(() => {
-        const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        const body = typeof response.payload === 'string' ? response.payload : JSON.stringify(response.payload);
         if (body) res.emit('data', body);
         res.emit('end');
       });
@@ -68,8 +102,13 @@ function restoreMocks() {
   fs.readFileSync = originalReadFileSync;
   https.request = originalRequest;
   lastRequestOptions = null;
+  __clearOAuthRefreshForTest();
   if (originalClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
   else process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+  for (const dir of tempDirs) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  tempDirs = [];
 }
 
 test.afterEach(() => {
@@ -96,9 +135,27 @@ test('Claude API marks null resets as reset-unavailable without zeroing the wind
   assert.ok(result.usage);
   assert.equal(result.status.code, 'reset-unavailable');
   assert.equal(result.status.connected, true);
+  assert.equal(result.status.label, '');
   assert.equal(result.usage.soResetMs, null);
   assert.equal(result.usage.extraUsage?.currency, 'USD');
   assert.equal(result.usage.plan, 'Max 5x');
+});
+
+test('Claude API keeps a visible reset warning when core reset timing is unavailable', async () => {
+  withMockCredentials();
+  withHttpResponse(200, {
+    five_hour: { utilization: 0.03, resets_at: null },
+    seven_day: { utilization: 0.4, resets_at: '2026-04-28T00:00:00.000Z' },
+    seven_day_sonnet: null,
+  });
+
+  const result = await fetchApiUsagePct();
+
+  assert.ok(result.usage);
+  assert.equal(result.status.code, 'reset-unavailable');
+  assert.equal(result.status.connected, true);
+  assert.equal(result.status.label, 'reset partial');
+  assert.equal(result.usage.h5ResetMs, null);
 });
 
 test('Claude API classifies 429 responses as rate limited', async () => {
@@ -116,19 +173,87 @@ test('Claude API classifies 429 responses as rate limited', async () => {
   assert.doesNotMatch(result.status.detail, /Please try again later/i);
 });
 
-test('Claude API classifies 401 as an expired stored CLI token', async () => {
+test('Claude API classifies 401 without burning a non-expired refresh token', async () => {
   withMockCredentials();
   withHttpResponse(401, { error: { message: 'invalid bearer token. Please try again later.' } });
+  let refreshCalls = 0;
+  __setOAuthRefreshPostForTest(async () => {
+    refreshCalls += 1;
+    return { status: 200, body: '{}' };
+  });
 
   const result = await fetchApiUsagePct();
 
   assert.equal(result.usage, null);
   assert.equal(result.status.code, 'unauthorized');
-  assert.equal(result.status.label, 'auth failed');
+  assert.equal(result.status.label, 'login required');
   assert.equal(result.status.httpStatus, 401);
-  assert.match(result.status.detail, /Claude CLI token was rejected or expired/);
+  assert.match(result.status.detail, /Run `claude \/login` to re-authenticate/);
   assert.match(result.status.detail, /invalid bearer token\./);
   assert.doesNotMatch(result.status.detail, /Please try again later/i);
+  assert.equal(refreshCalls, 0);
+});
+
+test('Claude API does not preflight refresh expired tokens when usage still succeeds', async () => {
+  const configDir = makeTempConfigDir();
+  writeRealCredentials(configDir, { expiresAt: Date.now() - 1000 });
+  withHttpResponse(200, {
+    five_hour: { utilization: 5, resets_at: '2026-04-24T05:00:00.000Z' },
+    seven_day: { utilization: 17, resets_at: '2026-04-28T00:00:00.000Z' },
+    seven_day_sonnet: null,
+  });
+  let refreshCalls = 0;
+  __setOAuthRefreshPostForTest(async () => {
+    refreshCalls += 1;
+    return { status: 200, body: '{}' };
+  });
+
+  const result = await fetchApiUsagePct();
+
+  assert.ok(result.usage);
+  assert.equal(result.status.code, 'ok');
+  assert.equal(refreshCalls, 0);
+});
+
+test('Claude API refreshes only after 401 when the stored access token is expired', async () => {
+  const configDir = makeTempConfigDir();
+  writeRealCredentials(configDir, { expiresAt: Date.now() - 1000 });
+  withHttpResponses([
+    { statusCode: 401, payload: { error: { message: 'expired access token. Please try again later.' } } },
+    {
+      statusCode: 200,
+      payload: {
+        five_hour: { utilization: 9, resets_at: '2026-04-24T05:00:00.000Z' },
+        seven_day: { utilization: 19, resets_at: '2026-04-28T00:00:00.000Z' },
+        seven_day_sonnet: null,
+      },
+    },
+  ]);
+  let refreshCalls = 0;
+  let refreshUserAgent = '';
+  __setOAuthRefreshPostForTest(async (_url, _params, userAgent) => {
+    refreshCalls += 1;
+    refreshUserAgent = userAgent;
+    return {
+      status: 200,
+      body: JSON.stringify({
+        access_token: 'new-access-token',
+        refresh_token: 'new-refresh-token',
+        expires_in: 28800,
+      }),
+    };
+  });
+
+  const result = await fetchApiUsagePct();
+  const updated = JSON.parse(fs.readFileSync(path.join(configDir, '.credentials.json'), 'utf-8'));
+
+  assert.ok(result.usage);
+  assert.equal(result.status.code, 'ok');
+  assert.equal(result.usage.h5Pct, 9);
+  assert.equal(refreshCalls, 1);
+  assert.equal(refreshUserAgent, 'claude-code/1.0');
+  assert.equal(updated.claudeAiOauth.accessToken, 'new-access-token');
+  assert.equal(lastRequestOptions?.headers?.Authorization, 'Bearer new-access-token');
 });
 
 test('Claude API uses percentage units returned by the usage endpoint', async () => {
@@ -143,6 +268,7 @@ test('Claude API uses percentage units returned by the usage endpoint', async ()
 
   assert.ok(result.usage);
   assert.equal(result.status.code, 'reset-unavailable');
+  assert.equal(result.status.label, '');
   assert.equal(result.usage.h5Pct, 5);
   assert.equal(result.usage.weekPct, 17);
   assert.match(String(lastRequestOptions?.headers?.['User-Agent']), /^claude-code\//);
@@ -206,6 +332,7 @@ test('Claude API treats utilization as percentage units when only Sonnet window 
 
   assert.ok(result.usage);
   assert.equal(result.status.code, 'reset-unavailable');
+  assert.equal(result.status.label, '');
   assert.equal(result.usage.h5Pct, 0.03);
   assert.equal(result.usage.weekPct, 0.4);
   assert.equal(result.usage.soPct, 0);

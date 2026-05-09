@@ -286,6 +286,12 @@ WhereMyTokens reads only local files — no cloud sync, no telemetry.
 
 ---
 
+## Troubleshooting
+
+If Claude OAuth refresh is repeatedly rate limited, set `WMT_DISABLE_REFRESH=1` before starting WhereMyTokens to stop all refresh attempts while still allowing cached/local usage data to load. Remove the variable after the server-side cooldown window has passed.
+
+---
+
 ## Install from Source
 
 ### Requirements

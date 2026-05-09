@@ -6,10 +6,12 @@ import path from 'node:path';
 import stateManagerModule from '../dist/main/stateManager.js';
 import * as jsonlCacheModule from '../dist/main/jsonlCache.js';
 import rateLimitFetcherModule from '../dist/main/rateLimitFetcher.js';
+import oauthRefreshModule from '../dist/main/oauthRefresh.js';
 
 const { StateManager } = stateManagerModule;
 const { JsonlCache } = jsonlCacheModule;
 const originalFetchApiUsagePct = rateLimitFetcherModule.fetchApiUsagePct;
+const originalGetOAuthCredentialFileState = oauthRefreshModule.getOAuthCredentialFileState;
 
 function makeStore(overrides = {}) {
   const values = { ...overrides };
@@ -31,6 +33,7 @@ function makeStore(overrides = {}) {
 
 test.afterEach(() => {
   rateLimitFetcherModule.fetchApiUsagePct = originalFetchApiUsagePct;
+  oauthRefreshModule.getOAuthCredentialFileState = originalGetOAuthCredentialFileState;
 });
 
 test('cached Claude percentages with null resets expire instead of surviving forever', () => {
@@ -410,6 +413,110 @@ test('rate-limited Claude refresh honors Retry-After before exponential backoff'
   assert.match(manager.apiError, /Retry in 4m/);
 });
 
+test('transient Claude API failures schedule a short recovery retry', async () => {
+  const manager = new StateManager(makeStore(), () => {});
+  let calls = 0;
+  rateLimitFetcherModule.fetchApiUsagePct = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return {
+        usage: null,
+        status: {
+          code: 'network',
+          connected: false,
+          label: 'api disconnected',
+          detail: 'Claude API network error (ECONNRESET).',
+        },
+      };
+    }
+    return {
+      usage: {
+        h5Pct: 21,
+        weekPct: 79,
+        soPct: 0,
+        h5ResetMs: 2 * 60 * 60 * 1000,
+        weekResetMs: 2 * 24 * 60 * 60 * 1000,
+        soResetMs: null,
+        plan: 'Pro',
+        extraUsage: null,
+      },
+      status: { code: 'ok', connected: true, label: '', detail: '' },
+    };
+  };
+
+  await manager.refreshApiUsagePct(true);
+
+  assert.ok(manager.apiRecoveryTimer);
+  assert.equal(manager.apiRecoveryRetryMs, 60_000);
+
+  await manager.refreshApiUsagePct(true);
+
+  assert.equal(manager.apiConnected, true);
+  assert.equal(manager.apiUsagePct.h5Pct, 21);
+  assert.equal(manager.apiRecoveryTimer, null);
+  assert.equal(manager.apiRecoveryRetryMs, 30_000);
+  manager.stop();
+});
+
+test('updated Claude credentials bypass refresh-limited API backoff', async () => {
+  const manager = new StateManager(makeStore(), () => {});
+  let credentialMtime = 1000;
+  let calls = 0;
+  oauthRefreshModule.getOAuthCredentialFileState = () => ({
+    hasCredentials: true,
+    hasAccessToken: true,
+    hasRefreshToken: true,
+    expiresAt: 4_000_000,
+    isExpired: false,
+    shouldRefresh: false,
+    msUntilExpiry: 3_000_000,
+    mtimeMs: credentialMtime,
+    size: 512,
+  });
+  rateLimitFetcherModule.fetchApiUsagePct = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return {
+        usage: null,
+        status: {
+          code: 'rate-limited',
+          connected: false,
+          label: 'refresh limited',
+          detail: 'Claude OAuth refresh is rate limited.',
+          httpStatus: 429,
+          retryAfterMs: 6 * 60 * 60 * 1000,
+        },
+      };
+    }
+    return {
+      usage: {
+        h5Pct: 30,
+        weekPct: 74,
+        soPct: 0,
+        h5ResetMs: 5 * 60 * 60 * 1000,
+        weekResetMs: 2 * 24 * 60 * 60 * 1000,
+        soResetMs: null,
+        plan: 'Pro',
+        extraUsage: null,
+      },
+      status: { code: 'ok', connected: true, label: '', detail: '' },
+    };
+  };
+
+  await manager.refreshApiUsagePct(true);
+  assert.equal(calls, 1);
+  assert.equal(manager.apiBackoffMs, 6 * 60 * 60 * 1000);
+
+  credentialMtime = 2000;
+  const retried = await manager.refreshApiUsagePct(false);
+
+  assert.equal(retried, true);
+  assert.equal(calls, 2);
+  assert.equal(manager.apiConnected, true);
+  assert.equal(manager.apiBackoffMs, 0);
+  assert.equal(manager.apiUsagePct.h5Pct, 30);
+});
+
 test('unauthorized Claude refresh keeps the last trusted API sample as cache', async () => {
   const cachedSample = {
     h5Pct: 5,
@@ -431,8 +538,8 @@ test('unauthorized Claude refresh keeps the last trusted API sample as cache', a
     status: {
       code: 'unauthorized',
       connected: false,
-      label: 'auth failed',
-      detail: 'Claude CLI token was rejected or expired.',
+      label: 'login required',
+      detail: 'Refresh token rejected. Run `claude /login` to re-authenticate.',
       httpStatus: 401,
     },
   });
@@ -440,7 +547,7 @@ test('unauthorized Claude refresh keeps the last trusted API sample as cache', a
   await manager.refreshApiUsagePct(true);
   const limits = manager.buildLimits();
 
-  assert.equal(manager.apiStatusLabel, 'auth failed');
+  assert.equal(manager.apiStatusLabel, 'login required');
   assert.equal(manager.apiUsagePct.h5Pct, 5);
   assert.equal(manager.apiUsagePct.weekPct, 17);
   assert.equal(store.values._cachedApiPct, cachedSample);
