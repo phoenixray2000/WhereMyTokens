@@ -101,7 +101,7 @@ test('refreshNow writes rotating Claude credentials atomically', async () => {
   assert.equal(updated.claudeAiOauth.refreshToken, 'new-refresh');
   assert.equal(updated.claudeAiOauth.rateLimitTier, 'max_5x');
   assert.equal(updated.preserved, true);
-  assert.ok(fs.existsSync(`${credentialsPath(dir)}.bak`));
+  assert.equal(fs.existsSync(`${credentialsPath(dir)}.bak`), false);
 });
 
 test('concurrent refreshNow calls share one OAuth request', async () => {
@@ -160,6 +160,8 @@ test('OAuth 429 cooldown is scoped to the current credential file', async () => 
   assert.equal(second.kind, 'rate-limited');
   assert.equal(calls, 1);
   assert.equal(store.values._oauthRefreshCooldown.reason, 'http-429');
+  assert.ok(first.retryAfterMs <= 10 * 60 * 1000);
+  assert.ok(store.values._oauthRefreshCooldown.until - Date.now() <= 10 * 60 * 1000 + 1000);
 
   writeCredentials(dir, {
     accessToken: 'rotated-access',
@@ -183,6 +185,56 @@ test('OAuth 429 cooldown is scoped to the current credential file', async () => 
   assert.equal(third.kind, 'ok');
   assert.equal(calls, 2);
   assert.equal(store.values._oauthRefreshCooldown, undefined);
+});
+
+test('refreshNow does not overwrite credentials changed during OAuth request', async () => {
+  const dir = useTempClaudeConfig();
+  writeCredentials(dir);
+  initOAuthRefresh(makeStore());
+  __setOAuthRefreshPostForTest(async () => {
+    writeCredentials(dir, {
+      accessToken: 'external-access',
+      refreshToken: 'external-refresh',
+      expiresAt: Date.now() + 3600_000,
+    });
+    return {
+      status: 200,
+      body: JSON.stringify({
+        access_token: 'new-access',
+        refresh_token: 'new-refresh',
+        expires_in: 3600,
+      }),
+    };
+  });
+
+  const outcome = await refreshNow('claude-code/1.0', 'test');
+  const updated = readCredentials(dir);
+
+  assert.equal(outcome.kind, 'ok');
+  assert.equal(outcome.accessToken, 'external-access');
+  assert.equal(updated.claudeAiOauth.accessToken, 'external-access');
+  assert.equal(updated.claudeAiOauth.refreshToken, 'external-refresh');
+});
+
+test('refreshNow rejects unusable successful OAuth payloads', async () => {
+  const dir = useTempClaudeConfig();
+  writeCredentials(dir);
+  initOAuthRefresh(makeStore());
+  __setOAuthRefreshPostForTest(async () => ({
+    status: 200,
+    body: JSON.stringify({
+      access_token: '',
+      refresh_token: 'new-refresh',
+      expires_in: -1,
+    }),
+  }));
+
+  const outcome = await refreshNow('claude-code/1.0', 'test');
+  const updated = readCredentials(dir);
+
+  assert.equal(outcome.kind, 'unexpected');
+  assert.equal(updated.claudeAiOauth.accessToken, 'old-access');
+  assert.equal(updated.claudeAiOauth.refreshToken, 'old-refresh');
 });
 
 test('refreshNow kill switch avoids OAuth network calls', async () => {

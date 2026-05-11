@@ -8,11 +8,13 @@ const REFRESH_LEEWAY_MS = 5 * 60 * 1000;
 const REFRESH_TIMEOUT_MS = 8000;
 const OAUTH_REFRESH_COOLDOWN_KEY = '_oauthRefreshCooldown';
 const RATE_LIMIT_BACKOFF_LADDER_MIN = [30, 120, 360, 1440] as const;
+const MAX_OAUTH_REFRESH_COOLDOWN_MS = 10 * 60 * 1000;
 const KILL_SWITCH_RETRY_MS = 60 * 60 * 1000;
 
 export type RefreshOutcome =
   | { kind: 'ok'; accessToken: string; expiresAt: number }
   | { kind: 'invalid-grant'; serverMessage?: string }
+  | { kind: 'write-failed' }
   | {
       kind: 'rate-limited';
       serverMessage?: string;
@@ -105,17 +107,10 @@ function readCredentialsFile(): CredentialsFile | null {
 
 export function writeCredentialsAtomic(updated: CredentialsFile): void {
   const target = credentialsPath();
-  const backup = `${target}.bak`;
   const tmp = `${target}.tmp.${process.pid}`;
   let fd: number | null = null;
 
   try {
-    try {
-      fs.copyFileSync(target, backup);
-    } catch {
-      // A missing backup should not block a successful refresh write.
-    }
-
     fd = fs.openSync(tmp, 'w', 0o600);
     fs.writeFileSync(fd, JSON.stringify(updated, null, 2), 'utf-8');
     fs.fsyncSync(fd);
@@ -249,7 +244,13 @@ function clearCooldown(): void {
 
 function nextCooldownMs(serverRetryAfterMs: number | undefined, consecutiveCount: number): number {
   const idx = Math.min(Math.max(0, consecutiveCount - 1), RATE_LIMIT_BACKOFF_LADDER_MIN.length - 1);
-  return Math.max(serverRetryAfterMs ?? 0, RATE_LIMIT_BACKOFF_LADDER_MIN[idx] * 60_000);
+  const boundedServerRetryAfterMs = serverRetryAfterMs == null
+    ? undefined
+    : Math.min(serverRetryAfterMs, MAX_OAUTH_REFRESH_COOLDOWN_MS);
+  return Math.min(
+    MAX_OAUTH_REFRESH_COOLDOWN_MS,
+    Math.max(boundedServerRetryAfterMs ?? 0, RATE_LIMIT_BACKOFF_LADDER_MIN[idx] * 60_000),
+  );
 }
 
 function rateLimitedFromCooldown(cooldown: OAuthRefreshCooldown, now: number): Extract<RefreshOutcome, { kind: 'rate-limited' }> {
@@ -329,6 +330,10 @@ export function getOAuthCredentialFileState(): OAuthCredentialFileState {
   return { ...state, mtimeMs, size };
 }
 
+export function getOAuthCredentialMarker(): string | null {
+  return currentCredentialMarker();
+}
+
 export async function refreshNow(userAgent: string, _trigger = 'unknown'): Promise<RefreshOutcome> {
   const now = Date.now();
   const cooldownBefore = getCooldown();
@@ -358,6 +363,7 @@ export async function refreshNow(userAgent: string, _trigger = 'unknown'): Promi
 
 async function doRefresh(userAgent: string): Promise<RefreshAttemptResult> {
   const cred = readCredentialsFile();
+  const startingMarker = currentCredentialMarker();
   const oauth = cred?.claudeAiOauth;
   const refreshToken = oauth?.refreshToken;
   if (!cred || !oauth || typeof refreshToken !== 'string' || refreshToken.length === 0) {
@@ -410,7 +416,13 @@ async function doRefresh(userAgent: string): Promise<RefreshAttemptResult> {
     };
   }
 
-  if (typeof parsed.access_token !== 'string' || typeof parsed.expires_in !== 'number' || !Number.isFinite(parsed.expires_in)) {
+  if (
+    typeof parsed.access_token !== 'string'
+    || parsed.access_token.trim().length === 0
+    || typeof parsed.expires_in !== 'number'
+    || !Number.isFinite(parsed.expires_in)
+    || parsed.expires_in <= 0
+  ) {
     return {
       outcome: { kind: 'unexpected', status: resp.status, body: resp.body.slice(0, 500) },
       networkAttempted: true,
@@ -419,6 +431,26 @@ async function doRefresh(userAgent: string): Promise<RefreshAttemptResult> {
   }
 
   const expiresAt = Date.now() + parsed.expires_in * 1000;
+  const latestMarker = currentCredentialMarker();
+  if (startingMarker && latestMarker && latestMarker !== startingMarker) {
+    const latest = readCredentialsFile();
+    const latestOauth = latest?.claudeAiOauth;
+    const latestAccessToken = latestOauth?.accessToken;
+    const latestExpiresAt = latestOauth?.expiresAt;
+    if (typeof latestAccessToken === 'string' && latestAccessToken.length > 0) {
+      clearCooldown();
+      return {
+        outcome: {
+          kind: 'ok',
+          accessToken: latestAccessToken,
+          expiresAt: typeof latestExpiresAt === 'number' && Number.isFinite(latestExpiresAt) ? latestExpiresAt : Date.now(),
+        },
+        networkAttempted: true,
+        httpStatus: resp.status,
+      };
+    }
+    return { outcome: { kind: 'invalid-grant' }, networkAttempted: true, httpStatus: resp.status };
+  }
   const updated: CredentialsFile = {
     ...cred,
     claudeAiOauth: {
@@ -430,7 +462,11 @@ async function doRefresh(userAgent: string): Promise<RefreshAttemptResult> {
       expiresAt,
     },
   };
-  writeCredentialsAtomic(updated);
+  try {
+    writeCredentialsAtomic(updated);
+  } catch {
+    return { outcome: { kind: 'write-failed' }, networkAttempted: true, httpStatus: resp.status };
+  }
   clearCooldown();
 
   return { outcome: { kind: 'ok', accessToken: parsed.access_token, expiresAt }, networkAttempted: true, httpStatus: resp.status };

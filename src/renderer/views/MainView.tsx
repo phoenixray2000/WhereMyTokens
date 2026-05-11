@@ -157,6 +157,8 @@ function buildHeaderStatus(args: {
       return { label: 'Claude limited', title: apiError || 'Claude API returned HTTP 429.', tone: 'warning' };
     case 'refresh limited':
       return { label: 'Claude refresh', title: apiError || 'Claude OAuth refresh is rate limited.', tone: 'warning' };
+    case 'refresh failed':
+      return { label: 'Claude refresh', title: apiError || 'Claude OAuth refresh failed.', tone: 'danger' };
     case 'schema changed':
       return { label: 'Claude schema', title: apiError || 'Claude API response changed shape.', tone: 'danger' };
     case 'reset partial':

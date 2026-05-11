@@ -330,6 +330,45 @@ test('Claude API reports login-required when expired-token refresh is rejected',
   assert.match(result.status.detail, /invalid refresh token/);
 });
 
+test('Claude API reports refresh-failed when expired-token refresh has a network error', async () => {
+  withTempClaudeCredentials({
+    accessToken: 'expired-access',
+    refreshToken: 'old-refresh',
+    expiresAt: Date.now() - 1000,
+  });
+  __setOAuthRefreshPostForTest(async () => {
+    throw new Error('network down');
+  });
+  withHttpResponse(401, { error: { message: 'invalid bearer token. Please try again later.' } });
+
+  const result = await fetchApiUsagePct();
+
+  assert.equal(result.usage, null);
+  assert.equal(result.status.code, 'network');
+  assert.equal(result.status.label, 'refresh failed');
+  assert.match(result.status.detail, /OAuth refresh failed/);
+});
+
+test('Claude API reports refresh-failed when expired-token refresh is unexpected', async () => {
+  withTempClaudeCredentials({
+    accessToken: 'expired-access',
+    refreshToken: 'old-refresh',
+    expiresAt: Date.now() - 1000,
+  });
+  __setOAuthRefreshPostForTest(async () => ({
+    status: 503,
+    body: JSON.stringify({ error: { message: 'temporarily unavailable' } }),
+  }));
+  withHttpResponse(401, { error: { message: 'invalid bearer token. Please try again later.' } });
+
+  const result = await fetchApiUsagePct();
+
+  assert.equal(result.usage, null);
+  assert.equal(result.status.code, 'http-error');
+  assert.equal(result.status.label, 'refresh failed');
+  assert.equal(result.status.httpStatus, 503);
+});
+
 test('Claude API caps huge Retry-After headers', async () => {
   withMockCredentials();
   withHttpResponse(429, { error: { message: 'too many requests. Please try again later.' } }, { 'retry-after': '999999' });

@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { getOAuthCredentialState, refreshNow, RefreshOutcome } from './oauthRefresh';
 
-export const API_USAGE_CACHE_SCHEMA_VERSION = 2;
+export const API_USAGE_CACHE_SCHEMA_VERSION = 3;
 export const CLAUDE_API_MAX_BACKOFF_MS = 600_000;
 
 const CLAUDE_USER_AGENT = 'claude-code/1.0';
@@ -44,6 +44,7 @@ export interface ApiUsagePct {
 export interface StoredApiUsagePct extends ApiUsagePct {
   storedAt: number;
   schemaVersion: number;
+  credentialMarker: string | null;
 }
 
 export type ClaudeApiStatusCode =
@@ -267,11 +268,15 @@ function normalizeResetValue(value: unknown): ApiResetMs {
   return Math.max(0, value);
 }
 
-export function normalizeStoredApiUsagePct(value: unknown): StoredApiUsagePct | null {
+export function normalizeStoredApiUsagePct(value: unknown, currentCredentialMarker: string | null = null): StoredApiUsagePct | null {
   const record = asRecord(value);
   if (!record) return null;
   if (record.schemaVersion !== API_USAGE_CACHE_SCHEMA_VERSION) return null;
   if (typeof record.plan !== 'string') return null;
+  const credentialMarker = typeof record.credentialMarker === 'string' && record.credentialMarker.length > 0
+    ? record.credentialMarker
+    : null;
+  if (currentCredentialMarker != null && credentialMarker !== currentCredentialMarker) return null;
 
   const storedAt = typeof record.storedAt === 'number' && Number.isFinite(record.storedAt)
     ? record.storedAt
@@ -289,6 +294,7 @@ export function normalizeStoredApiUsagePct(value: unknown): StoredApiUsagePct | 
     plan: record.plan,
     extraUsage: extraUsageSnapshot(record.extraUsage),
     storedAt,
+    credentialMarker,
   };
 }
 
@@ -564,6 +570,32 @@ function refreshRateLimitedStatus(outcome: Extract<RefreshOutcome, { kind: 'rate
   );
 }
 
+function refreshFailedStatus(outcome: Extract<RefreshOutcome, { kind: 'network' | 'unexpected' | 'write-failed' }>): ClaudeApiStatus {
+  if (outcome.kind === 'network') {
+    return buildStatus(
+      'network',
+      false,
+      'refresh failed',
+      'Claude OAuth refresh failed because the network request did not complete.',
+    );
+  }
+  if (outcome.kind === 'write-failed') {
+    return buildStatus(
+      'http-error',
+      false,
+      'refresh failed',
+      'Claude OAuth refresh succeeded, but the updated credentials could not be saved.',
+    );
+  }
+  return buildStatus(
+    'http-error',
+    false,
+    'refresh failed',
+    `Claude OAuth refresh returned HTTP ${outcome.status}.`,
+    { httpStatus: outcome.status },
+  );
+}
+
 export async function fetchApiUsagePct(): Promise<ApiUsageFetchResult> {
   const cred = readCredentials();
   if (!cred) {
@@ -601,6 +633,11 @@ export async function fetchApiUsagePct(): Promise<ApiUsageFetchResult> {
       }
       if (outcome.kind === 'rate-limited') {
         const status = refreshRateLimitedStatus(outcome);
+        logStatus(status);
+        return { usage: null, status };
+      }
+      if (outcome.kind === 'network' || outcome.kind === 'unexpected' || outcome.kind === 'write-failed') {
+        const status = refreshFailedStatus(outcome);
         logStatus(status);
         return { usage: null, status };
       }

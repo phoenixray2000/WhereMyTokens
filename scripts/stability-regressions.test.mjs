@@ -8,6 +8,7 @@ import stateManagerModule from '../dist/main/stateManager.js';
 import * as jsonlCacheModule from '../dist/main/jsonlCache.js';
 import rateLimitFetcherModule from '../dist/main/rateLimitFetcher.js';
 import codexUsageFetcherModule from '../dist/main/codexUsageFetcher.js';
+import oauthRefreshModule from '../dist/main/oauthRefresh.js';
 
 const { StateManager } = stateManagerModule;
 const { JsonlCache } = jsonlCacheModule;
@@ -51,6 +52,13 @@ function withTempClaudeCredentials(oauthOverrides = {}) {
   return dir;
 }
 
+function withCurrentClaudeCredentialMarker(sample) {
+  return {
+    ...sample,
+    credentialMarker: oauthRefreshModule.getOAuthCredentialMarker(),
+  };
+}
+
 function withTempCodexAuth() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wmt-codex-state-test-'));
   tempClaudeDirs.push(dir);
@@ -77,7 +85,7 @@ test.afterEach(() => {
 test('cached Claude percentages with null resets expire instead of surviving forever', () => {
   withTempClaudeCredentials();
   const manager = new StateManager(makeStore({
-    _cachedApiPct: {
+    _cachedApiPct: withCurrentClaudeCredentialMarker({
       schemaVersion: API_USAGE_CACHE_SCHEMA_VERSION,
       h5Pct: 63,
       weekPct: 41,
@@ -88,7 +96,7 @@ test('cached Claude percentages with null resets expire instead of surviving for
       plan: 'Max 5x',
       extraUsage: null,
       storedAt: Date.now() - (31 * 60 * 1000),
-    },
+    }),
   }), () => {});
 
   const limits = manager.buildLimits();
@@ -102,7 +110,7 @@ test('cached Claude API samples are aged once after startup', () => {
   withTempClaudeCredentials();
   const storedAt = Date.now() - (35 * 60 * 1000);
   const manager = new StateManager(makeStore({
-    _cachedApiPct: {
+    _cachedApiPct: withCurrentClaudeCredentialMarker({
       schemaVersion: API_USAGE_CACHE_SCHEMA_VERSION,
       h5Pct: 5,
       weekPct: 17,
@@ -113,7 +121,7 @@ test('cached Claude API samples are aged once after startup', () => {
       plan: 'Pro',
       extraUsage: null,
       storedAt,
-    },
+    }),
   }), () => {});
 
   const limits = manager.buildLimits();
@@ -139,6 +147,40 @@ test('legacy unversioned Claude API cache is discarded on startup', () => {
       storedAt: Date.now(),
     },
   });
+  const manager = new StateManager(store, () => {});
+
+  assert.equal(manager.apiUsagePct, null);
+  assert.equal(store.values._cachedApiPct, undefined);
+});
+
+test('Claude API cache is discarded after credential marker changes', () => {
+  const dir = withTempClaudeCredentials({
+    accessToken: 'first-access',
+    refreshToken: 'first-refresh',
+    expiresAt: Date.now() + 3600_000,
+  });
+  const cachedSample = withCurrentClaudeCredentialMarker({
+    schemaVersion: API_USAGE_CACHE_SCHEMA_VERSION,
+    h5Pct: 63,
+    weekPct: 41,
+    soPct: 7,
+    h5ResetMs: 60 * 60 * 1000,
+    weekResetMs: 6 * 24 * 60 * 60 * 1000,
+    soResetMs: null,
+    plan: 'Max 5x',
+    extraUsage: null,
+    storedAt: Date.now(),
+  });
+  fs.writeFileSync(path.join(dir, '.credentials.json'), JSON.stringify({
+    claudeAiOauth: {
+      accessToken: 'second-access',
+      refreshToken: 'second-refresh',
+      expiresAt: Date.now() + 3600_000,
+      rateLimitTier: 'max_5x',
+      subscriptionType: 'max',
+    },
+  }));
+  const store = makeStore({ _cachedApiPct: cachedSample });
   const manager = new StateManager(store, () => {});
 
   assert.equal(manager.apiUsagePct, null);
@@ -816,7 +858,7 @@ test('non-rate-limited Claude failure clears stale Retry-After backoff', async (
 });
 
 test('unauthorized Claude refresh keeps the last trusted API sample as cache', async () => {
-  const cachedSample = {
+  const cachedSample = withCurrentClaudeCredentialMarker({
     schemaVersion: API_USAGE_CACHE_SCHEMA_VERSION,
     h5Pct: 5,
     weekPct: 17,
@@ -827,7 +869,7 @@ test('unauthorized Claude refresh keeps the last trusted API sample as cache', a
     plan: 'Pro',
     extraUsage: null,
     storedAt: Date.now() - 5_000,
-  };
+  });
   const store = makeStore({ _cachedApiPct: cachedSample });
   const manager = new StateManager(store, () => {});
   manager.apiUsagePct = { ...cachedSample };

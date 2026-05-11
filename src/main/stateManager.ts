@@ -18,7 +18,7 @@ import { normalizeGitCwdKey, normalizeGitPathKey, preferGitStats, repoKeyFromGit
 import { ActivityBreakdown, ActivityBreakdownKind, CodexRateLimitWindow, FileUsageSummary, SessionSnapshot } from './jsonlTypes';
 import { CodexAccountState, readCodexAccountState } from './codexAccount';
 import { appendDebugMemoryLog, collectRuntimeMemorySnapshot, isDebugInstrumentationEnabled } from './debugInstrumentation';
-import { getOAuthCredentialFileState } from './oauthRefresh';
+import { getOAuthCredentialMarker } from './oauthRefresh';
 
 export interface SessionInfo extends DiscoveredSession {
   modelName: string;
@@ -344,20 +344,21 @@ export class StateManager {
     this.store = store;
     this.onUpdate = onUpdate;
     this.state = this.emptyState();
-    const persistedStore = this.store as unknown as Store<Record<string, unknown>>;
-    const cachedRaw = persistedStore.get('_cachedApiPct', null);
-    const cached = normalizeStoredApiUsagePct(cachedRaw);
+    const oauthCredentialMarker = getOAuthCredentialMarker();
+    this.lastOAuthCredentialMarker = oauthCredentialMarker;
+    const cachedRaw = this.getPersistedValue('_cachedApiPct', null);
+    const cached = normalizeStoredApiUsagePct(cachedRaw, oauthCredentialMarker);
     if (cachedRaw && !cached) {
-      persistedStore.delete('_cachedApiPct');
+      this.deletePersistedValue('_cachedApiPct');
     }
     if (cached && hasClaudeCredentials()) {
       this.apiUsagePctStoredAt = cached.storedAt;
       this.apiUsagePct = cached;
     }
-    const cachedCodexRaw = persistedStore.get('_cachedCodexUsagePct', null);
+    const cachedCodexRaw = this.getPersistedValue('_cachedCodexUsagePct', null);
     const cachedCodex = normalizeStoredCodexUsagePct(cachedCodexRaw, getCodexAuthMtimeMs());
     if (cachedCodexRaw && !cachedCodex) {
-      persistedStore.delete('_cachedCodexUsagePct');
+      this.deletePersistedValue('_cachedCodexUsagePct');
     }
     if (cachedCodex && hasCodexUsageCredentials()) {
       this.codexUsagePctStoredAt = cachedCodex.storedAt;
@@ -377,6 +378,36 @@ export class StateManager {
       };
       this.onUpdate(this.state);
     });
+  }
+
+  private getPersistedValue(key: string, fallback: unknown = null): unknown {
+    try {
+      return (this.store as unknown as Store<Record<string, unknown>>).get(key, fallback);
+    } catch {
+      return fallback;
+    }
+  }
+
+  private setPersistedValue(key: string, value: unknown): void {
+    try {
+      (this.store as unknown as Store<Record<string, unknown>>).set(key, value);
+    } catch {
+      // electron-store 오류가 화면 갱신을 막지 않도록 메모리 상태를 우선 유지한다.
+    }
+  }
+
+  private deletePersistedValue(key: string): void {
+    try {
+      (this.store as unknown as Store<Record<string, unknown>>).delete(key);
+    } catch {
+      // 캐시 정리에 실패해도 다음 정규화 단계에서 다시 무시된다.
+    }
+  }
+
+  private clearClaudeApiCache(): void {
+    this.apiUsagePct = null;
+    this.apiUsagePctStoredAt = 0;
+    this.deletePersistedValue('_cachedApiPct');
   }
 
   private getSettings(): AppSettings {
@@ -693,16 +724,7 @@ export class StateManager {
   }
 
   private consumeOAuthCredentialChange(): boolean {
-    const state = getOAuthCredentialFileState();
-    const marker = state.hasCredentials
-      ? [
-          state.mtimeMs ?? 'no-mtime',
-          state.size ?? 'no-size',
-          state.expiresAt ?? 'no-expiry',
-          state.hasAccessToken ? 'access' : 'no-access',
-          state.hasRefreshToken ? 'refresh' : 'no-refresh',
-        ].join(':')
-      : 'missing';
+    const marker = getOAuthCredentialMarker() ?? 'missing';
     const changed = this.lastOAuthCredentialMarker !== null && this.lastOAuthCredentialMarker !== marker;
     this.lastOAuthCredentialMarker = marker;
     return changed;
@@ -711,7 +733,10 @@ export class StateManager {
   private async refreshApiUsagePct(force = false): Promise<boolean> {
     const now = Date.now();
     const credentialsChanged = this.consumeOAuthCredentialChange();
-    if (credentialsChanged) this.apiBackoffMs = 0;
+    if (credentialsChanged) {
+      this.apiBackoffMs = 0;
+      this.clearClaudeApiCache();
+    }
     const elapsedSinceLastApiCall = now - this.lastApiCallMs;
     if (!credentialsChanged && this.apiBackoffMs > 0 && elapsedSinceLastApiCall < this.apiBackoffMs) return false;
     if (!force && !credentialsChanged && elapsedSinceLastApiCall < StateManager.API_MIN_INTERVAL_MS) return false;
@@ -723,21 +748,22 @@ export class StateManager {
 
     if (result.usage) {
       const mergedUsage = this.mergeApiUsageSample(result.usage, result.status, now);
+      const credentialMarker = getOAuthCredentialMarker();
+      this.lastOAuthCredentialMarker = credentialMarker;
       this.apiUsagePct = mergedUsage;
       this.apiUsagePctStoredAt = Date.now();
       this.apiBackoffMs = 0;
-      (this.store as unknown as Store<Record<string, unknown>>).set('_cachedApiPct', {
+      this.setPersistedValue('_cachedApiPct', {
         ...mergedUsage,
         storedAt: this.apiUsagePctStoredAt,
         schemaVersion: API_USAGE_CACHE_SCHEMA_VERSION,
+        credentialMarker,
       });
       return true;
     }
 
     if (result.status.code === 'no-credentials') {
-      this.apiUsagePct = null;
-      this.apiUsagePctStoredAt = 0;
-      (this.store as unknown as Store<Record<string, unknown>>).delete('_cachedApiPct');
+      this.clearClaudeApiCache();
     }
 
     if (result.status.code === 'rate-limited') {
@@ -782,7 +808,7 @@ export class StateManager {
       this.codexUsagePct = result.usage;
       this.codexUsagePctStoredAt = Date.now();
       this.codexUsageBackoffMs = 0;
-      (this.store as unknown as Store<Record<string, unknown>>).set('_cachedCodexUsagePct', {
+      this.setPersistedValue('_cachedCodexUsagePct', {
         ...result.usage,
         authMtimeMs: result.authMtimeMs,
         storedAt: this.codexUsagePctStoredAt,
@@ -794,7 +820,7 @@ export class StateManager {
     if (result.status.code === 'no-credentials') {
       this.codexUsagePct = null;
       this.codexUsagePctStoredAt = 0;
-      (this.store as unknown as Store<Record<string, unknown>>).delete('_cachedCodexUsagePct');
+      this.deletePersistedValue('_cachedCodexUsagePct');
     }
     this.codexUsageBackoffMs = this.codexBackoffForStatus(result.status);
     return true;
