@@ -151,6 +151,51 @@
 
 ---
 
+## 아키텍처
+
+WhereMyTokens는 local-first Electron 트레이 앱입니다. renderer는 로컬 파일이나 자격 증명을 직접 읽지 않으며, 파일 시스템, provider API, 트레이, 설정 작업은 Electron main process에서 처리하고 preload bridge를 통해서만 renderer에 전달합니다.
+
+| 계층 | 역할 |
+|------|------|
+| Electron main | Claude/Codex 세션 발견, JSONL 로그 파싱, provider 사용량 조회, 트레이/창 상태 관리, 앱 설정 저장. |
+| Preload bridge | `contextIsolation` 경계를 유지하면서 typed `window.wmt` IPC 표면만 노출. |
+| React renderer | 트레이 대시보드, 설정, 알림, 활동 차트, compact quota 위젯 표시. |
+| `statusLine` bridge | `src/bridge/bridge.ts`가 Claude Code stdin JSON을 받아 main process가 감시하는 로컬 bridge snapshot을 기록. |
+
+| 데이터 흐름 | 소스 | 목적지 | 네트워크 |
+|-------------|------|--------|----------|
+| Claude 세션 | `~/.claude/sessions/*.json`, `~/.claude/projects/**/*.jsonl` | main process parser/cache, 이후 renderer state | 없음 |
+| Claude 브리지 | Claude Code `statusLine` stdin | `%APPDATA%\WhereMyTokens\live-session.json` | 없음 |
+| Claude 사용량 한도 | `~/.claude/.credentials.json` OAuth token | Anthropic `/api/oauth/usage` | 있음, Anthropic 직접 호출 |
+| Codex 세션 | `~/.codex/sessions/**/*.jsonl` | main process parser/cache, 이후 renderer state | 없음 |
+| Codex 사용량 한도 | `~/.codex/auth.json` OAuth token | ChatGPT/Codex usage endpoint | 있음, OpenAI/ChatGPT 직접 호출 |
+
+속도 제한 우선순위는 provider별로 다릅니다. Claude는 Anthropic API를 1순위로 사용하고 `statusLine` bridge를 폴백으로 사용합니다. Codex는 live usage를 1순위로 사용하고 JSONL 로그의 로컬 `rate_limits` 이벤트를 폴백으로 사용합니다. 두 provider 모두 마지막 성공 값은 stale 상태가 되기 전까지만 유지합니다.
+
+---
+
+## 보안 & 개인정보
+
+WhereMyTokens는 로컬 파일을 읽고, 활성화된 경우 본인 계정의 provider 사용량 API만 직접 호출합니다. 클라우드 동기화와 텔레메트리는 없습니다.
+
+| 로컬 경로 | 용도 |
+|-----------|------|
+| `~/.claude/sessions/*.json` | pid, cwd, 모델 같은 Claude 세션 메타데이터. |
+| `~/.claude/projects/**/*.jsonl` | 토큰 수, 비용, 컨텍스트, 활동 요약 계산용 Claude 대화 로그. |
+| `~/.claude/.credentials.json` | Anthropic 사용량 조회와 만료된 access token refresh에만 쓰는 Claude OAuth 정보. |
+| `~/.codex/sessions/**/*.jsonl` | 토큰, cached input, 모델, rate-limit 이벤트, tool 활동 계산용 Codex 세션 로그. |
+| `~/.codex/auth.json` | Codex 사용량 snapshot 조회에만 쓰는 ChatGPT OAuth 정보. 앱 storage에 복사하거나 로그로 남기지 않습니다. |
+| `%APPDATA%\WhereMyTokens\live-session.json` | Claude Code `statusLine` bridge가 쓰는 로컬 bridge snapshot. |
+| Electron app data (`%APPDATA%\WhereMyTokens`) | 앱 설정, 로컬 캐시, 알림 기록, bridge 상태. |
+
+자격 증명 처리는 좁게 제한되어 있습니다. WhereMyTokens는 공식 CLI의 로컬 credential 파일을 읽고, API key를 직접 입력받지 않으며, 별도 credential 백업을 저장하지 않습니다. Claude access token이 만료되면 Anthropic을 통해 refresh하고 갱신된 credentials를 `~/.claude/.credentials.json`에 원자적으로 다시 쓸 수 있습니다.
+
+네트워크 접근은 활성 provider 모드의 usage endpoint로 제한됩니다. Claude usage polling은 최대 5분마다 실행하고 429 backoff를 적용합니다. Codex live usage는 HTTPS-only 요청, timeout, 응답 크기 제한, cache, backoff를 적용합니다. 로컬 JSONL 파싱과 `statusLine` bridge는 세션 내용을 외부로 보내지 않습니다.
+
+Claude Code bridge를 끄려면 **Settings -> Claude Code Integration -> Disable**을 누릅니다. 앱은 WhereMyTokens bridge command가 소유한 `statusLine` entry만 제거하며, 다른 custom `statusLine`은 덮어쓰거나 삭제하지 않습니다. 수동으로는 `~/.claude/settings.json`에서 WhereMyTokens `statusLine` entry를 삭제한 뒤 Claude Code를 재시작하면 됩니다.
+
+---
+
 ## 시작 & 헤더 상태
 
 시작 직후에는 현재 세션과 최근 사용량을 먼저 보여줍니다. `Partial History`가 보이면 오래된 히스토리를 백그라운드에서 계속 동기화 중이라는 뜻이며, 트레이 앱을 빨리 열기 위한 동작입니다.
@@ -159,21 +204,13 @@
 
 ---
 
-## Claude Code 연동 (브리지)
+## Provider 추적 상세
 
-WhereMyTokens는 공식 `statusLine` 플러그인 메커니즘을 통해 Claude Code로부터 실시간 속도 제한 데이터를 받을 수 있습니다 — API 폴링 불필요.
+### Claude Code 브리지
 
-**동작 방식:**
-1. **Settings → Claude Code Integration → Setup** 실행
-2. `~/.claude/settings.json`에 WhereMyTokens를 `statusLine` 명령으로 등록
-3. Claude Code 실행 시마다 세션 데이터(속도 제한, 컨텍스트 %, 모델, 비용)를 stdin으로 전달
-4. 앱이 즉시 업데이트 — 폴링 지연 없음
+WhereMyTokens는 Claude Code의 공식 `statusLine` 플러그인 메커니즘을 통해 컨텍스트, 모델, 비용, 폴백용 속도 제한 데이터를 실시간으로 받을 수 있습니다. **Settings -> Claude Code Integration -> Setup**으로 등록하고, **Disable**로 WhereMyTokens가 소유한 bridge entry를 제거합니다.
 
-브리지는 컨텍스트 창 %, 모델, 비용 등 보조 데이터를 제공합니다. 속도 제한 퍼센트는 항상 Anthropic API를 권위 있는 소스로 사용하며, API를 사용할 수 없을 때만 브리지 값으로 폴백합니다.
-
----
-
-## Codex 추적
+### Codex 추적
 
 WhereMyTokens는 Codex의 로컬 JSONL 로그(`~/.codex/sessions/**/*.jsonl`)도 읽을 수 있습니다. Settings에서 **Claude**, **Codex**, **Both** 중 하나를 선택합니다.
 
@@ -195,24 +232,6 @@ Claude의 캐시 효율은 다음 식을 사용합니다.
 ```text
 cache_read_input_tokens / (cache_read_input_tokens + cache_creation_input_tokens)
 ```
-
----
-
-## 속도 제한 동작 방식
-
-Claude와 Codex는 서로 다른 한도 소스와 5h/1w reset window를 사용합니다.
-
-| 우선순위 | 소스 | 설명 |
-|---------|------|------|
-| Claude 1순위 | **Anthropic API** | `/api/oauth/usage` — 웹 대시보드와 동일한 권위 있는 데이터. 활성 provider 모드에서 5분마다 조회, 429 시 지수 백오프. 로컬 access token이 만료되면 Anthropic을 통해 refresh하고 갱신된 credentials를 원자적으로 다시 씁니다. |
-| Claude 2순위 | **브리지 (stdin)** | `statusLine`을 통해 Claude Code에서 전달되는 실시간 데이터. API 불가 시 폴백. |
-| Codex 1순위 | **Live Codex usage** | 활성 provider 모드에서 최대 5분마다 계정 사용량 snapshot 조회. HTTPS GET, timeout, 응답 크기 제한, backoff 적용. |
-| Codex 2순위 | **로컬 Codex 로그** | live usage/cache를 사용할 수 없을 때 `~/.codex/sessions/**/*.jsonl` 내부 `rate_limits` 이벤트 중 가장 최신 값을 사용. |
-| 폴백 | **마지막 알려진 값** | 데이터 실패 시 마지막 성공 값 유지. 리셋 시각이 지난 stale 데이터는 자동 초기화. |
-
-헤더 상태 pill은 API/폴백 상태를 표시합니다. Quota Pace Health 행은 보이는 provider를 각각 `Claude OK`, `Codex OK`, `Cache`, `Bridge`, `Log`, `syncing`, `waiting`으로 표시합니다.
-
----
 
 ## 수치 계산 기준
 
@@ -262,21 +281,6 @@ Claude는 input, output, cache creation, cache read를 제공합니다. Codex는
 | 🌐 Web | 퍼플 | `WebFetch`, `WebSearch` |
 
 > **토큰 배분:** 각 턴의 output 토큰을 컨텐츠 블록 문자 수 비율로 분배 (`블록 문자 수 ÷ 전체 문자 수 × output 토큰`). 값이 0인 카테고리는 숨김.
-
----
-
-## 데이터 & 개인정보
-
-WhereMyTokens는 로컬 파일을 읽고, 활성화된 경우 본인 계정의 provider 사용량 API만 직접 호출합니다 — 클라우드 동기화 없음, 텔레메트리 없음. Claude API polling 중 로컬 OAuth access token이 만료되면 Anthropic을 통해 refresh하고 `~/.claude/.credentials.json`에 다시 쓸 수 있으며, 별도 자격 증명 백업 파일은 보관하지 않습니다.
-
-| 파일 | 용도 |
-|------|------|
-| `~/.claude/sessions/*.json` | 세션 메타데이터 (pid, cwd, 모델) |
-| `~/.claude/projects/**/*.jsonl` | 대화 로그 (토큰 수, 비용) |
-| `~/.claude/.credentials.json` | OAuth 토큰 — Anthropic에서 본인 사용량 조회와 만료된 Claude access token refresh용 |
-| `~/.codex/sessions/**/*.jsonl` | Codex 세션 로그 (토큰 수, cached input, 모델, rate-limit 이벤트, tool call) |
-| `~/.codex/auth.json` | ChatGPT OAuth 토큰 — 본인 Codex 사용량 snapshot 조회용으로만 사용하며 WhereMyTokens가 로그로 남기거나 저장하지 않음 |
-| `%APPDATA%\WhereMyTokens\live-session.json` | `statusLine` 플러그인 브리지 데이터 |
 
 ---
 

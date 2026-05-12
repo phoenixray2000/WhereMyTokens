@@ -151,6 +151,51 @@
 
 ---
 
+## 架构
+
+WhereMyTokens 是 local-first 的 Electron 托盘应用。renderer 不会直接读取本地文件或凭据；文件系统、provider API、托盘与设置逻辑都在 Electron main process 中处理，并且只通过 preload bridge 传递给 renderer。
+
+| 层 | 职责 |
+|----|------|
+| Electron main | 发现 Claude/Codex 会话，解析 JSONL 日志，获取 provider 使用量，管理托盘/窗口状态，并持久化应用设置。 |
+| Preload bridge | 在保持 `contextIsolation` 边界的同时，只暴露 typed `window.wmt` IPC surface。 |
+| React renderer | 显示托盘仪表板、设置、通知、活动图表和 compact quota 小部件。 |
+| `statusLine` bridge | `src/bridge/bridge.ts` 从 Claude Code stdin 接收 JSON，并写入 main process 监听的本地 bridge snapshot。 |
+
+| 数据流 | 来源 | 目的地 | 网络 |
+|--------|------|--------|------|
+| Claude 会话 | `~/.claude/sessions/*.json`, `~/.claude/projects/**/*.jsonl` | main process parser/cache，然后进入 renderer state | 否 |
+| Claude 桥接 | Claude Code `statusLine` stdin | `%APPDATA%\WhereMyTokens\live-session.json` | 否 |
+| Claude 使用量限制 | `~/.claude/.credentials.json` OAuth token | Anthropic `/api/oauth/usage` | 是，直接请求 Anthropic |
+| Codex 会话 | `~/.codex/sessions/**/*.jsonl` | main process parser/cache，然后进入 renderer state | 否 |
+| Codex 使用量限制 | `~/.codex/auth.json` OAuth token | ChatGPT/Codex usage endpoint | 是，直接请求 OpenAI/ChatGPT |
+
+速率限制优先级按 provider 区分：Claude 优先使用 Anthropic API，并以 `statusLine` bridge 作为回退；Codex 优先使用 live usage，并以 JSONL 日志中的本地 `rate_limits` 事件作为回退；两者都只在数据尚未 stale 前保留最后一次成功值。
+
+---
+
+## 安全与隐私
+
+WhereMyTokens 会读取本地文件，并在启用时仅直接请求您自己账号的 provider 使用量 API。没有云同步，也没有遥测。
+
+| 本地路径 | 用途 |
+|----------|------|
+| `~/.claude/sessions/*.json` | Claude 会话元数据，例如 pid、cwd、模型。 |
+| `~/.claude/projects/**/*.jsonl` | 用于令牌数、费用、上下文和活动摘要的 Claude 对话日志。 |
+| `~/.claude/.credentials.json` | Claude OAuth 信息，仅用于 Anthropic 使用量请求和过期 access token refresh。 |
+| `~/.codex/sessions/**/*.jsonl` | 用于令牌、cached input、模型、rate-limit 事件和 tool 活动的 Codex 会话日志。 |
+| `~/.codex/auth.json` | ChatGPT OAuth 信息，仅用于 Codex 使用量 snapshot；不会复制到应用 storage，也不会记录到日志。 |
+| `%APPDATA%\WhereMyTokens\live-session.json` | Claude Code `statusLine` bridge 写入的本地 bridge snapshot。 |
+| Electron app data (`%APPDATA%\WhereMyTokens`) | 应用设置、本地缓存、通知历史和 bridge 状态。 |
+
+凭据处理范围刻意保持很窄。WhereMyTokens 读取官方 CLI 的本地 credential 文件，不要求粘贴 API key，不保存单独的 credential 备份，也会从状态输出中隐藏 credential 细节。如果 Claude access token 过期，应用可能通过 Anthropic refresh，并将更新后的 credentials 原子写回 `~/.claude/.credentials.json`。
+
+网络访问仅限启用 provider 模式下的 usage endpoint。Claude usage polling 最多每 5 分钟执行一次，并带有 429 backoff。Codex live usage 使用 HTTPS-only request、timeout、响应大小限制、cache 和 backoff。本地 JSONL 解析与 `statusLine` bridge 不会把会话内容发送到外部。
+
+要禁用 Claude Code bridge，请打开 **Settings -> Claude Code Integration -> Disable**。应用只会在 `statusLine` entry 属于 WhereMyTokens bridge command 时移除它；不会覆盖或删除其他 custom `statusLine`。也可以手动删除 `~/.claude/settings.json` 中的 WhereMyTokens `statusLine` entry，然后重启 Claude Code。
+
+---
+
 ## 启动与头部状态
 
 启动时，仪表板会先显示当前会话和最近用量。如果看到 `Partial History`，说明较早的历史仍在后台同步，这样托盘应用可以更快打开。
@@ -159,7 +204,13 @@
 
 ---
 
-## Codex 追踪
+## Provider 追踪详情
+
+### Claude Code 桥接
+
+WhereMyTokens 可以通过 Claude Code 官方 `statusLine` 插件机制实时接收上下文、模型、费用和回退用的速率限制数据。使用 **Settings -> Claude Code Integration -> Setup** 注册桥接，或使用 **Disable** 移除 WhereMyTokens 拥有的 bridge entry。
+
+### Codex 追踪
 
 WhereMyTokens 也可以读取 Codex 的本地 JSONL 日志：`~/.codex/sessions/**/*.jsonl`。在 Settings 中选择 **Claude**、**Codex** 或 **Both**。
 
@@ -189,23 +240,6 @@ cache_read_input_tokens / (cache_read_input_tokens + cache_creation_input_tokens
 令牌数会尽可能包含 **input + output + cache creation + cache reads**。费用始终是基于应用内价格表的 API 等价估算值。
 
 Claude 提供 input、output、cache creation 与 cache read。Codex 提供 raw input、cached input 与 output，因此 WhereMyTokens 会把 raw input 拆成 uncached input 与 cached input，避免缓存节省金额和模型合计重复计算。
-
-Claude 和 Codex 使用独立的 5h/1w reset window。Claude 限额优先使用 Anthropic API，其次使用 statusLine/cache；如果本地 access token 过期，WhereMyTokens 可以通过 Anthropic refresh 并原子写回更新后的 credentials。Codex 限额优先使用 live Codex usage snapshot，其次使用 cache/local `rate_limits` 事件。实时请求仅针对启用的 provider，最短间隔为 5 分钟，并带有 timeout、响应大小限制和 backoff。
-
----
-
-## 数据与隐私
-
-WhereMyTokens 会读取本地文件，并在启用时仅直接请求您自己账号的 provider 使用量 API — 无云同步，无遥测。Claude API polling 中本地 OAuth access token 过期时，应用可能通过 Anthropic refresh 并写回 `~/.claude/.credentials.json`；WhereMyTokens 不会保留单独的凭据备份。
-
-| 文件 | 用途 |
-|------|------|
-| `~/.claude/sessions/*.json` | 会话元数据（pid、cwd、模型） |
-| `~/.claude/projects/**/*.jsonl` | 对话日志（令牌数、费用） |
-| `~/.claude/.credentials.json` | OAuth 令牌 — 仅用于从 Anthropic 获取您的使用统计，并 refresh 过期的 Claude access token |
-| `~/.codex/sessions/**/*.jsonl` | Codex 会话日志（令牌、cached input、模型、rate-limit 事件、tool call） |
-| `~/.codex/auth.json` | ChatGPT OAuth 令牌 — 仅用于获取您自己的 Codex 使用量 snapshot；WhereMyTokens 不会记录或保存该令牌 |
-| `%APPDATA%\WhereMyTokens\live-session.json` | `statusLine` 插件写入的桥接数据 |
 
 ---
 

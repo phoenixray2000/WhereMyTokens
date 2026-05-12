@@ -152,6 +152,51 @@ Click the tray icon (or press the global shortcut `Ctrl+Shift+D`).
 
 ---
 
+## Architecture
+
+WhereMyTokens is a local-first Electron tray app. The renderer never reads local files or credentials directly; all filesystem, provider API, tray, and settings work stays in the Electron main process and is exposed through the preload bridge.
+
+| Layer | Responsibility |
+|-------|----------------|
+| Electron main | Discovers Claude/Codex sessions, parses JSONL logs, fetches provider usage, manages tray/window state, and persists app settings. |
+| Preload bridge | Exposes the typed `window.wmt` IPC surface while keeping `contextIsolation` boundaries intact. |
+| React renderer | Shows the tray dashboard, settings, notifications, activity charts, and the compact quota widget. |
+| `statusLine` bridge | `src/bridge/bridge.ts` receives Claude Code JSON on stdin and writes a local bridge snapshot for the main process to watch. |
+
+| Data flow | Source | Destination | Network |
+|-----------|--------|-------------|---------|
+| Claude sessions | `~/.claude/sessions/*.json`, `~/.claude/projects/**/*.jsonl` | Main-process parser/cache, then renderer state | No |
+| Claude bridge | Claude Code `statusLine` stdin | `%APPDATA%\WhereMyTokens\live-session.json` | No |
+| Claude usage limits | `~/.claude/.credentials.json` OAuth token | Anthropic `/api/oauth/usage` | Yes, direct to Anthropic |
+| Codex sessions | `~/.codex/sessions/**/*.jsonl` | Main-process parser/cache, then renderer state | No |
+| Codex usage limits | `~/.codex/auth.json` OAuth token | ChatGPT/Codex usage endpoint | Yes, direct to OpenAI/ChatGPT |
+
+Rate-limit precedence is provider-specific: Claude uses the Anthropic API first, then the `statusLine` bridge as fallback; Codex uses live usage first, then local `rate_limits` events from JSONL logs; both providers keep the last known value only until it becomes stale.
+
+---
+
+## Security & Privacy
+
+WhereMyTokens reads local files and, when enabled, makes direct provider usage requests for your own account. There is no cloud sync and no telemetry.
+
+| Local path | Purpose |
+|------------|---------|
+| `~/.claude/sessions/*.json` | Claude session metadata such as pid, cwd, and model. |
+| `~/.claude/projects/**/*.jsonl` | Claude conversation logs used for token counts, costs, context, and activity summaries. |
+| `~/.claude/.credentials.json` | Claude OAuth material used only for Anthropic usage requests and expired access-token refresh. |
+| `~/.codex/sessions/**/*.jsonl` | Codex session logs used for tokens, cached input, models, rate-limit events, and tool activity. |
+| `~/.codex/auth.json` | ChatGPT OAuth material used only for Codex usage snapshots; it is not logged or copied into app storage. |
+| `%APPDATA%\WhereMyTokens\live-session.json` | Local bridge snapshot written by the Claude Code `statusLine` bridge. |
+| Electron app data (`%APPDATA%\WhereMyTokens`) | App settings, local caches, notification history, and bridge state. |
+
+Credential handling is intentionally narrow: WhereMyTokens reads provider credentials from the official local CLI files, does not ask you to paste API keys, does not store a separate credential backup, and redacts credential details from status output. If Claude's local access token expires, the app may refresh it through Anthropic and atomically write the updated credentials back to `~/.claude/.credentials.json`.
+
+Network access is limited to provider usage endpoints for enabled provider modes. Claude usage polling runs at most every 5 minutes with 429 backoff. Codex live usage uses HTTPS-only requests with timeout, response-size cap, cache, and backoff. Local JSONL parsing and the `statusLine` bridge do not send session contents anywhere.
+
+To disable the Claude Code bridge, open **Settings -> Claude Code Integration -> Disable**. The app removes the `statusLine` entry only when it owns the WhereMyTokens bridge command; it will not overwrite or delete another custom `statusLine`. Manual removal is also possible by deleting the WhereMyTokens `statusLine` entry from `~/.claude/settings.json`, then restarting Claude Code.
+
+---
+
 ## Startup & Header States
 
 At startup the dashboard shows current sessions and recent usage first. If you see `Partial History`, older history is still syncing in the background so the tray app can open quickly.
@@ -160,21 +205,13 @@ The small PiP button in the header toggles the floating Quota Pace widget. The h
 
 ---
 
-## Claude Code Integration (Bridge)
+## Provider Tracking Details
 
-WhereMyTokens can receive live rate limit data from Claude Code via the official `statusLine` plugin mechanism — no API polling required.
+### Claude Code bridge
 
-**How it works:**
-1. Open **Settings → Claude Code Integration → Setup**
-2. This registers WhereMyTokens as a `statusLine` command in `~/.claude/settings.json`
-3. Each time Claude Code runs, it pipes session data (rate limits, context %, model, cost) to WhereMyTokens via stdin
-4. The app updates immediately — no polling delay
+WhereMyTokens can receive live context, model, cost, and fallback rate-limit data through Claude Code's official `statusLine` plugin mechanism. Use **Settings -> Claude Code Integration -> Setup** to register the bridge, or **Disable** to remove the WhereMyTokens-owned bridge entry.
 
-The bridge provides supplementary context data (context window %, model, cost). Rate limit percentages always use the Anthropic API as the authoritative source; bridge values serve as a fallback when the API is unavailable.
-
----
-
-## Codex tracking
+### Codex tracking
 
 WhereMyTokens can also read Codex's local JSONL logs from `~/.codex/sessions/**/*.jsonl`. In Settings, choose **Claude**, **Codex**, or **Both**.
 
@@ -196,24 +233,6 @@ This differs from Claude, where cache efficiency is:
 ```text
 cache_read_input_tokens / (cache_read_input_tokens + cache_creation_input_tokens)
 ```
-
----
-
-## How rate limits work
-
-Claude and Codex use separate limit sources and separate 5h/1w reset windows:
-
-| Priority | Source | Description |
-|----------|--------|-------------|
-| Claude 1st | **Anthropic API** | `/api/oauth/usage` — authoritative % and reset times. Fetched every 5 min for enabled provider modes; exponential backoff on 429. If the local access token is expired, WhereMyTokens can refresh it through Anthropic and write the updated credentials atomically. |
-| Claude 2nd | **Bridge (stdin)** | Live data from Claude Code via `statusLine`. Used as fallback when API is unavailable. |
-| Codex 1st | **Live Codex usage** | Account usage snapshot fetched at most every 5 min for enabled provider modes, with HTTPS-only GET, timeout, response-size cap, and backoff. |
-| Codex 2nd | **Local Codex logs** | `rate_limits` events inside `~/.codex/sessions/**/*.jsonl`, using the newest observed event when live usage/cache is unavailable. |
-| Fallback | **Last known value** | On data failure, the last successful value is kept. Stale data past its reset window is auto-cleared. |
-
-The header status pill summarizes API fallback or reset availability. The Quota Pace Health row shows each visible provider separately (`Claude OK`, `Codex OK`, `Cache`, `Bridge`, `Log`, `syncing`, or `waiting`).
-
----
 
 ## How numbers work
 
@@ -263,21 +282,6 @@ Click the **Details** button on any session row to expand activity by category. 
 | 🌐 Web | Purple | `WebFetch`, `WebSearch` |
 
 > **Token attribution:** each turn's output tokens are split across content blocks by character proportion (`block_chars ÷ total_chars × output_tokens`). Zero-value categories are hidden.
-
----
-
-## Data & Privacy
-
-WhereMyTokens reads local files and, when enabled, makes direct provider usage requests for your own account — no cloud sync, no telemetry. For Claude API polling, an expired local OAuth access token may be refreshed through Anthropic and written back to `~/.claude/.credentials.json`; WhereMyTokens does not keep a separate credential backup.
-
-| File | Purpose |
-|------|---------|
-| `~/.claude/sessions/*.json` | Session metadata (pid, cwd, model) |
-| `~/.claude/projects/**/*.jsonl` | Conversation logs (token counts, costs) |
-| `~/.claude/.credentials.json` | OAuth token — used only to fetch your own usage from Anthropic and refresh expired Claude access tokens |
-| `~/.codex/sessions/**/*.jsonl` | Codex session logs (token counts, cached input, models, rate-limit events, tool calls) |
-| `~/.codex/auth.json` | ChatGPT OAuth token — used only to fetch your own Codex usage snapshot; never logged or stored by WhereMyTokens |
-| `%APPDATA%\WhereMyTokens\live-session.json` | Bridge data written by the `statusLine` plugin |
 
 ---
 

@@ -1,11 +1,15 @@
 import { ipcMain, app } from 'electron';
-import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import Store from 'electron-store';
 import { AppState, DebugMemSnapshot } from './stateManager';
 import { getHistory, clearHistory } from './notificationHistory';
 import { isDebugInstrumentationEnabled } from './debugInstrumentation';
+import {
+  disableIntegration,
+  getIntegrationStatus,
+  setupIntegration,
+} from './integration';
 
 const DEFAULT_MAIN_SECTION_ORDER = ['planUsage', 'codeOutput', 'sessions', 'activity', 'modelUsage'];
 const MAIN_SECTION_IDS = new Set(DEFAULT_MAIN_SECTION_ORDER);
@@ -161,6 +165,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'auto',
 };
 
+function claudeSettingsPath(): string {
+  return path.join(os.homedir(), '.claude', 'settings.json');
+}
+
+function bridgeScriptPath(): string {
+  return path.join(app.getAppPath(), '..', 'bridge', 'bridge.js');
+}
+
 export function registerIpcHandlers(
   store: Store<AppSettings>,
   getState: () => AppState,
@@ -202,36 +214,13 @@ export function registerIpcHandlers(
     return getDebugMemSnapshot();
   });
 
-  // Claude Code statusLine bridge setup
-  ipcMain.handle('integration:setup', () => {
-    try {
-      const bridgeJs = path.join(app.getAppPath(), '..', 'bridge', 'bridge.js');
-      const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+  const handleIntegrationSetup = () => setupIntegration(claudeSettingsPath(), bridgeScriptPath());
+  const handleIntegrationStatus = () => getIntegrationStatus(claudeSettingsPath(), bridgeScriptPath());
+  const handleIntegrationDisable = () => disableIntegration(claudeSettingsPath(), bridgeScriptPath());
 
-      let settings: Record<string, unknown> = {};
-      if (fs.existsSync(claudeSettingsPath)) {
-        try { settings = JSON.parse(fs.readFileSync(claudeSettingsPath, 'utf-8')); } catch { /* use empty */ }
-      }
-
-      const cmd = `node "${bridgeJs.replace(/\\/g, '\\\\')}"`;
-      settings['statusLine'] = { type: 'command', command: cmd };
-
-      fs.mkdirSync(path.dirname(claudeSettingsPath), { recursive: true });
-      fs.writeFileSync(claudeSettingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-      return { ok: true, command: cmd };
-    } catch (e) {
-      return { ok: false, error: String(e) };
-    }
-  });
-
-  ipcMain.handle('integration:status', () => {
-    try {
-      const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
-      if (!fs.existsSync(claudeSettingsPath)) return { configured: false };
-      const s = JSON.parse(fs.readFileSync(claudeSettingsPath, 'utf-8')) as Record<string, unknown>;
-      const sl = s['statusLine'] as Record<string, unknown> | undefined;
-      const configured = !!(sl?.command && String(sl.command).includes('bridge'));
-      return { configured, command: sl?.command ?? '' };
-    } catch { return { configured: false }; }
-  });
+  ipcMain.handle('integration-setup', handleIntegrationSetup);
+  ipcMain.handle('integration-status', handleIntegrationStatus);
+  ipcMain.handle('integration-disable', handleIntegrationDisable);
+  ipcMain.handle('integration:setup', handleIntegrationSetup);
+  ipcMain.handle('integration:status', handleIntegrationStatus);
 }

@@ -151,6 +151,51 @@
 
 ---
 
+## アーキテクチャ
+
+WhereMyTokens は local-first の Electron トレイアプリです。renderer はローカルファイルや認証情報を直接読み取らず、ファイルシステム、provider API、トレイ、設定の処理は Electron main process に置き、preload bridge 経由でのみ renderer に渡します。
+
+| レイヤー | 役割 |
+|----------|------|
+| Electron main | Claude/Codex セッション検出、JSONL ログ解析、provider 使用量取得、トレイ/ウィンドウ状態管理、アプリ設定の保存。 |
+| Preload bridge | `contextIsolation` 境界を保ちながら typed `window.wmt` IPC surface だけを公開。 |
+| React renderer | トレイダッシュボード、設定、通知、アクティビティチャート、compact quota ウィジェットを表示。 |
+| `statusLine` bridge | `src/bridge/bridge.ts` が Claude Code stdin JSON を受け取り、main process が監視するローカル bridge snapshot を書き込みます。 |
+
+| データフロー | ソース | 宛先 | ネットワーク |
+|--------------|--------|------|--------------|
+| Claude セッション | `~/.claude/sessions/*.json`, `~/.claude/projects/**/*.jsonl` | main process parser/cache、その後 renderer state | なし |
+| Claude ブリッジ | Claude Code `statusLine` stdin | `%APPDATA%\WhereMyTokens\live-session.json` | なし |
+| Claude 使用量制限 | `~/.claude/.credentials.json` OAuth token | Anthropic `/api/oauth/usage` | あり、Anthropic へ直接 |
+| Codex セッション | `~/.codex/sessions/**/*.jsonl` | main process parser/cache、その後 renderer state | なし |
+| Codex 使用量制限 | `~/.codex/auth.json` OAuth token | ChatGPT/Codex usage endpoint | あり、OpenAI/ChatGPT へ直接 |
+
+レート制限の優先順位は provider ごとに異なります。Claude は Anthropic API を第 1 ソースにし、`statusLine` bridge をフォールバックにします。Codex は live usage を第 1 ソースにし、JSONL ログ内のローカル `rate_limits` イベントをフォールバックにします。どちらも最後の成功値は stale になるまでだけ保持します。
+
+---
+
+## セキュリティ & プライバシー
+
+WhereMyTokens はローカルファイルを読み取り、有効な場合は自分のアカウントの provider 使用量 API だけを直接呼び出します。クラウド同期とテレメトリはありません。
+
+| ローカルパス | 用途 |
+|--------------|------|
+| `~/.claude/sessions/*.json` | pid、cwd、モデルなどの Claude セッションメタデータ。 |
+| `~/.claude/projects/**/*.jsonl` | トークン数、コスト、コンテキスト、活動サマリー計算用の Claude 会話ログ。 |
+| `~/.claude/.credentials.json` | Anthropic 使用量取得と期限切れ access token refresh にだけ使う Claude OAuth 情報。 |
+| `~/.codex/sessions/**/*.jsonl` | トークン、cached input、モデル、rate-limit イベント、tool 活動計算用の Codex セッションログ。 |
+| `~/.codex/auth.json` | Codex 使用量 snapshot の取得にだけ使う ChatGPT OAuth 情報。アプリ storage へコピーしたりログ出力したりしません。 |
+| `%APPDATA%\WhereMyTokens\live-session.json` | Claude Code `statusLine` bridge が書き込むローカル bridge snapshot。 |
+| Electron app data (`%APPDATA%\WhereMyTokens`) | アプリ設定、ローカルキャッシュ、通知履歴、bridge 状態。 |
+
+認証情報の扱いは狭く限定されています。WhereMyTokens は公式 CLI のローカル credential ファイルを読み取り、API key の貼り付けを求めず、別の credential バックアップを保存しません。Claude access token が期限切れの場合は Anthropic で refresh し、更新された credentials を `~/.claude/.credentials.json` に原子的に書き戻すことがあります。
+
+ネットワークアクセスは有効な provider モードの usage endpoint に限定されます。Claude usage polling は最大 5 分ごとに実行し、429 backoff を適用します。Codex live usage は HTTPS-only request、timeout、レスポンスサイズ制限、cache、backoff を適用します。ローカル JSONL 解析と `statusLine` bridge はセッション内容を外部へ送信しません。
+
+Claude Code bridge を無効化するには **Settings -> Claude Code Integration -> Disable** を押します。アプリは WhereMyTokens bridge command が所有する `statusLine` entry だけを削除し、他の custom `statusLine` を上書きまたは削除しません。手動では `~/.claude/settings.json` から WhereMyTokens の `statusLine` entry を削除し、Claude Code を再起動してください。
+
+---
+
 ## 起動とヘッダーステータス
 
 起動直後は現在のセッションと最近の使用量を先に表示します。`Partial History` が見える場合は、古い履歴をバックグラウンドで同期している途中で、トレイアプリを速く開くための動作です。
@@ -159,21 +204,13 @@
 
 ---
 
-## Claude Code 連携（ブリッジ）
+## Provider 追跡詳細
 
-WhereMyTokens は公式の `statusLine` プラグインメカニズムを通じて、Claude Code からリアルタイムのレート制限データを受信できます — API ポーリング不要。
+### Claude Code ブリッジ
 
-**仕組み：**
-1. **Settings → Claude Code Integration → Setup** を実行
-2. `~/.claude/settings.json` に WhereMyTokens を `statusLine` コマンドとして登録
-3. Claude Code が実行されるたびに、セッションデータ（レート制限、コンテキスト %、モデル、コスト）を stdin 経由で送信
-4. アプリが即座に更新 — ポーリングの遅延なし
+WhereMyTokens は Claude Code の公式 `statusLine` プラグインメカニズムを通じて、コンテキスト、モデル、コスト、フォールバック用レート制限データをリアルタイムで受信できます。**Settings -> Claude Code Integration -> Setup** で登録し、**Disable** で WhereMyTokens が所有する bridge entry を削除します。
 
-ブリッジはコンテキストウィンドウ %、モデル、コストなどの補助データを提供します。レート制限のパーセンテージは常に Anthropic API を権威あるソースとして使用し、API が利用できない場合のみブリッジ値にフォールバックします。
-
----
-
-## Codex 追跡
+### Codex 追跡
 
 WhereMyTokens は Codex のローカル JSONL ログ（`~/.codex/sessions/**/*.jsonl`）も読み取れます。Settings で **Claude**、**Codex**、**Both** のいずれかを選択します。
 
@@ -195,24 +232,6 @@ Claude のキャッシュ効率は次の式を使います。
 ```text
 cache_read_input_tokens / (cache_read_input_tokens + cache_creation_input_tokens)
 ```
-
----
-
-## レート制限の仕組み
-
-Claude と Codex は別々の制限ソースと 5h/1w reset window を使用します。
-
-| 優先度 | ソース | 説明 |
-|--------|--------|------|
-| Claude 第 1 | **Anthropic API** | `/api/oauth/usage` — ウェブダッシュボードと同じ権威あるデータ。有効な provider モードで 5 分ごとに取得、429 時は指数バックオフ。ローカル access token が期限切れの場合は Anthropic で refresh し、更新された credentials を原子的に書き戻します。 |
-| Claude 第 2 | **ブリッジ（stdin）** | `statusLine` 経由で Claude Code からのリアルタイムデータ。API 不可時のフォールバック。 |
-| Codex 第 1 | **Live Codex usage** | 有効な provider モードで最大 5 分ごとにアカウント使用量 snapshot を取得。HTTPS GET、timeout、レスポンスサイズ制限、backoff を適用。 |
-| Codex 第 2 | **ローカル Codex ログ** | live usage/cache が使えない場合、`~/.codex/sessions/**/*.jsonl` 内の `rate_limits` イベントのうち最新の観測値を使用。 |
-| フォールバック | **最後の既知の値** | データ取得失敗時は最後の成功値を保持。リセット済みの古いデータは自動クリア。 |
-
-ヘッダーのステータス pill は API/フォールバック状態を示します。Quota Pace Health 行は表示中の provider をそれぞれ `Claude OK`、`Codex OK`、`Cache`、`Bridge`、`Log`、`syncing`、`waiting` として表示します。
-
----
 
 ## 数値の計算基準
 
@@ -262,21 +281,6 @@ Claude は input、output、cache creation、cache read を提供します。Cod
 | 🌐 Web | パープル | `WebFetch`, `WebSearch` |
 
 > **トークン配分：** 各ターンの output トークンをコンテンツブロック文字数比率で分配（`ブロック文字数 ÷ 総文字数 × output トークン数`）。値が 0 のカテゴリは非表示。
-
----
-
-## データ & プライバシー
-
-WhereMyTokens はローカルファイルを読み取り、有効な場合は自分のアカウントの provider 使用量 API だけを直接呼び出します — クラウド同期なし、テレメトリなし。Claude API polling 中にローカル OAuth access token が期限切れの場合は Anthropic で refresh し、`~/.claude/.credentials.json` に書き戻すことがあります。別の認証情報バックアップは保持しません。
-
-| ファイル | 用途 |
-|----------|------|
-| `~/.claude/sessions/*.json` | セッションメタデータ（pid、cwd、モデル） |
-| `~/.claude/projects/**/*.jsonl` | 会話ログ（トークン数、コスト） |
-| `~/.claude/.credentials.json` | OAuth トークン — Anthropic から自分の使用量を取得し、期限切れの Claude access token を refresh するために使用 |
-| `~/.codex/sessions/**/*.jsonl` | Codex セッションログ（トークン数、cached input、モデル、rate-limit イベント、tool call） |
-| `~/.codex/auth.json` | ChatGPT OAuth トークン — 自分の Codex 使用量 snapshot の取得にのみ使用し、WhereMyTokens はログ出力も保存もしません |
-| `%APPDATA%\WhereMyTokens\live-session.json` | `statusLine` プラグインのブリッジデータ |
 
 ---
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AppSettings } from '../types';
+import { AppSettings, IntegrationStatus } from '../types';
 import { useTheme } from '../ThemeContext';
 import ViewHeader from '../components/ViewHeader';
 import { DEFAULT_MAIN_SECTION_ORDER, MAIN_SECTION_LABELS, MainSectionId, normalizeMainSectionOrder } from '../mainSections';
@@ -110,7 +110,7 @@ export default function SettingsView({ settings, onSave, onBack }: Props) {
   const [baseSettings] = useState(() => normalizeSettingsDraft(settings));
   const [s, setS] = useState(() => normalizeSettingsDraft(settings));
   const [recordingHotkey, setRecordingHotkey] = useState(false);
-  const [integrationConfigured, setIntegrationConfigured] = useState<boolean | null>(null);
+  const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
   const [integrationMsg, setIntegrationMsg] = useState('');
   const latestSettings = useMemo(() => normalizeSettingsDraft(settings), [settings]);
   const settingsToSave = useMemo(() => buildSettingsPatch(s, baseSettings, latestSettings), [s, baseSettings, latestSettings]);
@@ -124,16 +124,24 @@ export default function SettingsView({ settings, onSave, onBack }: Props) {
   const chk: React.CSSProperties = useMemo(() => ({ accentColor: C.accent }), [C]);
 
   useEffect(() => {
-    window.wmt.getIntegrationStatus().then(r => setIntegrationConfigured(r.configured)).catch(() => {});
+    window.wmt.getIntegrationStatus().then(setIntegrationStatus).catch(() => {});
   }, []);
+
+  function updateIntegrationStatus(result: IntegrationStatus) {
+    setIntegrationStatus({
+      configured: result.configured,
+      owner: result.owner,
+      command: result.command,
+    });
+  }
 
   async function handleSetupIntegration() {
     setIntegrationMsg('Setting up...');
     try {
       const r = await window.wmt.setupIntegration();
+      updateIntegrationStatus(r);
       if (r.ok) {
-        setIntegrationConfigured(true);
-        setIntegrationMsg('Done! Restart Claude Code to activate.');
+        setIntegrationMsg('Done. Restart Claude Code to activate.');
       } else {
         setIntegrationMsg(`Failed: ${r.error ?? 'unknown error'}`);
       }
@@ -141,6 +149,29 @@ export default function SettingsView({ settings, onSave, onBack }: Props) {
       setIntegrationMsg(`Error: ${String(e)}`);
     }
     setTimeout(() => setIntegrationMsg(''), 4000);
+  }
+
+  async function handleDisableIntegration() {
+    setIntegrationMsg('Disabling...');
+    try {
+      const r = await window.wmt.disableIntegration();
+      updateIntegrationStatus(r);
+      if (r.ok) {
+        setIntegrationMsg('Disabled. Restart Claude Code to stop the bridge.');
+      } else {
+        setIntegrationMsg(`Failed: ${r.error ?? 'unknown error'}`);
+      }
+    } catch (e) {
+      setIntegrationMsg(`Error: ${String(e)}`);
+    }
+    setTimeout(() => setIntegrationMsg(''), 4000);
+  }
+
+  function integrationLabel(status: IntegrationStatus | null): string {
+    if (!status) return '';
+    if (status.owner === 'wmt') return 'Connected';
+    if (status.owner === 'other') return 'Other statusLine';
+    return 'Not configured';
   }
 
   function SectionHeader({ label }: { label: string }) {
@@ -202,9 +233,17 @@ export default function SettingsView({ settings, onSave, onBack }: Props) {
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              {integrationConfigured !== null && (
-                <span style={{ fontSize: 10, color: integrationConfigured ? '#4a9a4a' : C.textMuted }}>
-                  {integrationConfigured ? '● Connected' : '○ Not configured'}
+              {integrationStatus !== null && (
+                <span
+                  title={integrationStatus.command}
+                  style={{
+                    fontSize: 10,
+                    color: integrationStatus.owner === 'wmt'
+                      ? '#4a9a4a'
+                      : (integrationStatus.owner === 'other' ? '#b7791f' : C.textMuted),
+                  }}
+                >
+                  {integrationLabel(integrationStatus)}
                 </span>
               )}
               <button
@@ -212,6 +251,22 @@ export default function SettingsView({ settings, onSave, onBack }: Props) {
                 style={{ background: C.accent, color: '#fff', border: 'none', borderRadius: 4, padding: '4px 10px', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
               >
                 Setup
+              </button>
+              <button
+                onClick={handleDisableIntegration}
+                disabled={integrationStatus?.owner !== 'wmt'}
+                style={{
+                  background: integrationStatus?.owner === 'wmt' ? C.bgRow : C.bg,
+                  color: integrationStatus?.owner === 'wmt' ? C.text : C.textMuted,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 4,
+                  padding: '4px 10px',
+                  fontSize: 11,
+                  cursor: integrationStatus?.owner === 'wmt' ? 'pointer' : 'not-allowed',
+                  fontWeight: 600,
+                }}
+              >
+                Disable
               </button>
             </div>
           </div>

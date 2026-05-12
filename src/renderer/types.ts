@@ -267,6 +267,19 @@ export interface DebugMemSnapshot {
   };
 }
 
+export type IntegrationOwner = 'wmt' | 'other' | 'none';
+
+export interface IntegrationStatus {
+  configured: boolean;
+  owner: IntegrationOwner;
+  command?: string;
+}
+
+export interface IntegrationMutationResult extends IntegrationStatus {
+  ok: boolean;
+  error?: string;
+}
+
 declare global {
   interface Window {
     wmt: {
@@ -276,8 +289,9 @@ declare global {
       setSettings:        (p: Partial<AppSettings>) => Promise<AppSettings>;
       getNotifications:   () => Promise<HistoryItem[]>;
       clearNotifications: () => Promise<HistoryItem[]>;
-      setupIntegration:     () => Promise<{ ok: boolean; command?: string; error?: string }>;
-      getIntegrationStatus: () => Promise<{ configured: boolean; command?: string }>;
+      setupIntegration:     () => Promise<IntegrationMutationResult>;
+      disableIntegration:   () => Promise<IntegrationMutationResult>;
+      getIntegrationStatus: () => Promise<IntegrationStatus>;
       quit:               () => Promise<void>;
       minimize:           () => Promise<void>;
       openDashboard:      () => Promise<void>;
