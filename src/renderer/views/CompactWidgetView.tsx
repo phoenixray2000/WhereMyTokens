@@ -124,7 +124,7 @@ function missingLimitStatus(
   return {};
 }
 
-function MiniLimitStatus({ state }: { state: 'syncing' | 'waiting' }) {
+function MiniLimitStatus({ state, animate = true }: { state: 'syncing' | 'waiting'; animate?: boolean }) {
   const C = useTheme();
   const label = state === 'syncing' ? 'syncing' : 'waiting';
   return (
@@ -134,7 +134,15 @@ function MiniLimitStatus({ state }: { state: 'syncing' | 'waiting' }) {
           <span
             key={index}
             className="wmt-sync-dot"
-            style={{ width: 3, height: 3, background: state === 'syncing' ? C.accent : C.textMuted, animationDelay: `${index * 0.16}s` }}
+            style={{
+              width: 3,
+              height: 3,
+              background: state === 'syncing' ? C.accent : C.textMuted,
+              animation: animate ? undefined : 'none',
+              animationDelay: animate ? `${index * 0.16}s` : undefined,
+              opacity: animate ? undefined : 0.55,
+              transform: animate ? undefined : 'scale(0.85)',
+            }}
           />
         ))}
       </span>
@@ -223,6 +231,7 @@ function ProgressRow({
   unknownLabel = 'loading',
   unknownBadge = 'wait',
   unknownTitle,
+  animateWaiting = false,
 }: {
   label: string;
   quotaPct: number;
@@ -234,10 +243,12 @@ function ProgressRow({
   unknownLabel?: string;
   unknownBadge?: string;
   unknownTitle?: string;
+  animateWaiting?: boolean;
 }) {
   const C = useTheme();
   const quota = clampPct(quotaPct);
   const visualState: 'syncing' | 'waiting' | null = pending ? 'syncing' : unknown ? (unknownLabel === 'loading' ? 'syncing' : 'waiting') : null;
+  const suppressWaitingAnimation = visualState === 'waiting' && !animateWaiting;
   const elapsed = visualState ? null : timeElapsedPct(label, resetMs);
   const elapsedWidth = elapsed ?? 0;
   const resetLabel = pending ? '' : unknown ? unknownBadge : formatResetShort(resetMs);
@@ -287,6 +298,8 @@ function ProgressRow({
               background: visualState === 'syncing'
                 ? `linear-gradient(90deg, transparent, ${C.accent}88, transparent)`
                 : `linear-gradient(90deg, transparent, ${C.textMuted}55, transparent)`,
+              animation: suppressWaitingAnimation ? 'none' : undefined,
+              opacity: suppressWaitingAnimation ? 0.32 : undefined,
             }}
           />
         ) : null}
@@ -310,7 +323,7 @@ function ProgressRow({
         style={{ textAlign: 'right', color: C.textDim, fontSize: 10, fontFamily: C.fontMono, whiteSpace: 'nowrap' }}
       >
         {visualState ? (
-          <MiniLimitStatus state={visualState} />
+          <MiniLimitStatus state={visualState} animate={!suppressWaitingAnimation} />
         ) : (
           <>
             <span style={{ color: paceColor }}>{formatPct(quota)}</span>
@@ -323,7 +336,7 @@ function ProgressRow({
   );
 }
 
-function AgentBlock({ agent }: { agent: WidgetAgent }) {
+function AgentBlock({ agent, animateWaiting }: { agent: WidgetAgent; animateWaiting: boolean }) {
   const C = useTheme();
   return (
     <div style={{ display: 'grid', gap: 5 }}>
@@ -364,6 +377,7 @@ function AgentBlock({ agent }: { agent: WidgetAgent }) {
             unknownLabel={row.unknownLabel}
             unknownBadge={row.unknownBadge}
             unknownTitle={row.unknownTitle}
+            animateWaiting={animateWaiting}
           />
         ))}
       </div>
@@ -591,7 +605,7 @@ export default function CompactWidgetView({ state, onRefresh }: Props) {
       </div>
 
       <div style={{ display: 'grid', gap: agents.length > 1 ? 9 : 6 }}>
-        {agents.map(agent => <AgentBlock key={agent.key} agent={agent} />)}
+        {agents.map(agent => <AgentBlock key={agent.key} agent={agent} animateWaiting={state.settings.compactWidgetWaitingAnimationEnabled === true} />)}
       </div>
       {healthItems.length > 0 ? (
         <div

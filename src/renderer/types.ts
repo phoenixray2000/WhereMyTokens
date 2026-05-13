@@ -165,6 +165,7 @@ export interface AppSettings {
   hiddenProjects: string[];
   excludedProjects: string[];
   compactWidgetEnabled: boolean;
+  compactWidgetWaitingAnimationEnabled: boolean;
   compactWidgetBounds: { x: number; y: number } | null;
   theme: 'auto' | 'light' | 'dark';
 }

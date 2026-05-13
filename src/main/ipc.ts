@@ -37,6 +37,7 @@ export interface AppSettings {
   hiddenProjects: string[];
   excludedProjects: string[];
   compactWidgetEnabled: boolean;
+  compactWidgetWaitingAnimationEnabled: boolean;
   compactWidgetBounds: CompactWidgetBounds | null;
   theme: 'auto' | 'light' | 'dark';
 }
@@ -126,6 +127,7 @@ function normalizedSettingsPartial(partial: unknown): Partial<AppSettings> {
   const excludedProjects = stringArray(record.excludedProjects);
   if (excludedProjects) next.excludedProjects = excludedProjects;
   if (typeof record.compactWidgetEnabled === 'boolean') next.compactWidgetEnabled = record.compactWidgetEnabled;
+  if (typeof record.compactWidgetWaitingAnimationEnabled === 'boolean') next.compactWidgetWaitingAnimationEnabled = record.compactWidgetWaitingAnimationEnabled;
   if (Object.prototype.hasOwnProperty.call(record, 'compactWidgetBounds')) {
     const compactWidgetBounds = normalizeCompactWidgetBounds(record.compactWidgetBounds);
     if (compactWidgetBounds !== undefined) next.compactWidgetBounds = compactWidgetBounds;
@@ -161,6 +163,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hiddenProjects: [],
   excludedProjects: [],
   compactWidgetEnabled: false,
+  compactWidgetWaitingAnimationEnabled: false,
   compactWidgetBounds: null,
   theme: 'auto',
 };

@@ -52,7 +52,7 @@ const DEFAULT_STATE: AppState = {
     trayDisplay: 'h5pct', theme: 'auto',
     mainSectionOrder: DEFAULT_MAIN_SECTION_ORDER,
     hiddenProjects: [], excludedProjects: [],
-    compactWidgetEnabled: false, compactWidgetBounds: null,
+    compactWidgetEnabled: false, compactWidgetWaitingAnimationEnabled: false, compactWidgetBounds: null,
   },
   autoLimits: null,
   codexAccount: { serviceTier: null },
@@ -192,6 +192,7 @@ function normalizeState(next: AppState): AppState {
       hiddenProjects: arrayOrEmpty(next.settings?.hiddenProjects),
       excludedProjects: arrayOrEmpty(next.settings?.excludedProjects),
       compactWidgetEnabled: next.settings?.compactWidgetEnabled === true,
+      compactWidgetWaitingAnimationEnabled: next.settings?.compactWidgetWaitingAnimationEnabled === true,
       compactWidgetBounds: next.settings?.compactWidgetBounds
         && typeof next.settings.compactWidgetBounds.x === 'number'
         && typeof next.settings.compactWidgetBounds.y === 'number'

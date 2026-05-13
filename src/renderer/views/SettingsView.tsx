@@ -78,6 +78,7 @@ const EDITABLE_SETTING_KEYS: EditableSettingKey[] = [
   'hiddenProjects',
   'excludedProjects',
   'compactWidgetEnabled',
+  'compactWidgetWaitingAnimationEnabled',
   'theme',
 ];
 
@@ -297,6 +298,15 @@ export default function SettingsView({ settings, onSave, onBack }: Props) {
             </div>
           </div>
           <input type="checkbox" style={chk} checked={s.compactWidgetEnabled} onChange={e => setS({ ...s, compactWidgetEnabled: e.target.checked })} />
+        </div>
+        <div style={row}>
+          <div>
+            <div style={labelStyle}>Waiting animation</div>
+            <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>
+              Animates floating-widget waiting bars when limit data is missing
+            </div>
+          </div>
+          <input type="checkbox" style={chk} checked={s.compactWidgetWaitingAnimationEnabled} onChange={e => setS({ ...s, compactWidgetWaitingAnimationEnabled: e.target.checked })} />
         </div>
         <div style={row}>
           <span style={labelStyle}>Global shortcut</span>
