@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.14.0/WhereMyTokens-Setup.exe"><strong>下载 v1.14.0</strong></a>
+  <a href="https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.15.0/WhereMyTokens-Setup.exe"><strong>下载 v1.15.0</strong></a>
   ·
   <a href="#功能特性">功能特性</a>
   ·
@@ -59,11 +59,11 @@
 
 | 版本 | 日期 | 主要变更 |
 |------|------|--------|
+| **[v1.15.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.15.0)** | 5/14 | 新增 Settings 开关，默认关闭 compact widget 的 waiting animation，同时保留 syncing animation |
 | **[v1.14.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.14.0)** | 5/11 | 新增 Claude OAuth refresh 恢复、按凭据隔离的 API 缓存保护、Claude refresh/login 状态显示，以及 Floating 小部件隐藏/快捷键恢复修复 |
 | **[v1.13.2](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.13.2)** | 5/8 | 修复 Codex 5 小时限制已满时每周限制也被显示为 100% 的问题 |
 | **[v1.13.1](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.13.1)** | 5/7 | 在主头部新增 Floating Quota Pace 小部件快捷开关，并修复小部件 toolbar 图标点击偶尔被识别为拖拽的问题 |
 | **[v1.13.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.13.0)** | 5/7 | 新增更稳健的 Codex live usage 同步、安全 API backoff、provider 级 Quota Pace health 标签，以及更清晰的 fallback/loading 状态 |
-| **[v1.12.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.12.0)** | 5/6 | 新增 Floating Quota Pace 小部件、主布局自定义、带时间进度的使用量条、新截图，并强化小部件/设置同步 |
 
 [→ 完整更新日志](https://github.com/jeongwookie/WhereMyTokens/releases)
 
@@ -71,9 +71,9 @@
 
 ## 下载
 
-**[⬇ 下载安装程序 (.exe)](https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.14.0/WhereMyTokens-Setup.exe)** — 下载后直接运行即可
+**[⬇ 下载安装程序 (.exe)](https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.15.0/WhereMyTokens-Setup.exe)** — 下载后直接运行即可
 
-**[⬇ 下载便携 ZIP](https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.14.0/WhereMyTokens-v1.14.0-win-x64.zip)** — 无需安装
+**[⬇ 下载便携 ZIP](https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.15.0/WhereMyTokens-v1.15.0-win-x64.zip)** — 无需安装
 
 下载或安装即表示您同意[最终用户许可协议 (EULA)](EULA.txt)。
 
@@ -83,7 +83,7 @@
 3. 应用自动打开并驻留在系统托盘中
 
 **方式 B — 便携 ZIP** _(无需安装)_
-1. 在发布页面下载 `WhereMyTokens-v1.14.0-win-x64.zip`
+1. 在发布页面下载 `WhereMyTokens-v1.15.0-win-x64.zip`
 2. 解压到任意位置
 3. 运行 `WhereMyTokens.exe`
 
@@ -126,7 +126,7 @@
 ### 个性化
 - **Auto/Light/Dark 主题** — 默认跟随系统偏好
 - **费用显示** — USD 或 KRW，可配置汇率
-- **Floating usage widget** — 始终置顶显示的小型 Quota Pace 悬浮窗口；可从主头部、托盘菜单、Settings 或小部件按钮显示/隐藏
+- **Floating usage widget** — 始终置顶显示的小型 Quota Pace 悬浮窗口；可从主头部、托盘菜单、Settings 或小部件按钮显示/隐藏。Waiting animation 默认关闭，可在 Settings 中重新开启
 - **托盘标签** — 在任务栏直接显示使用率 %、令牌数或费用
 - **项目管理** — 隐藏或完全排除项目
 - **随 Windows 启动** — 可选自动启动

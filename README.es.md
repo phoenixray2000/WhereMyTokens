@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.14.0/WhereMyTokens-Setup.exe"><strong>Descargar v1.14.0</strong></a>
+  <a href="https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.15.0/WhereMyTokens-Setup.exe"><strong>Descargar v1.15.0</strong></a>
   ·
   <a href="#características">Características</a>
   ·
@@ -59,11 +59,11 @@
 
 | Versión | Fecha | Cambios destacados |
 |---------|-------|-------------------|
+| **[v1.15.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.15.0)** | 14 may | Añade un toggle en Settings que mantiene desactivadas por defecto las animaciones waiting del widget compacto, conservando la animación syncing |
 | **[v1.14.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.14.0)** | 11 may | Añade recuperación de Claude OAuth refresh, caché de API ligada a credenciales, estados Claude refresh/login más claros y recuperación del widget flotante tras ocultarlo o usar atajos |
 | **[v1.13.2](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.13.2)** | 8 may | Corrige el uso semanal de Codex para que un límite de 5 horas alcanzado no fuerce la ventana semanal a 100% |
 | **[v1.13.1](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.13.1)** | 7 may | Añade un toggle en el encabezado principal para el widget flotante Quota Pace y corrige clics en iconos del toolbar del widget que podían capturarse como arrastre |
 | **[v1.13.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.13.0)** | 7 may | Añade sincronización live usage de Codex más robusta, backoff seguro de API, chips Quota Pace health por provider y estados fallback/loading más claros |
-| **[v1.12.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.12.0)** | 6 may | Añade el widget flotante Quota Pace, personalización del diseño principal, barras de uso con tiempo transcurrido, nuevas capturas y sincronización más robusta del widget y Settings |
 
 [→ Historial completo](https://github.com/jeongwookie/WhereMyTokens/releases)
 
@@ -71,9 +71,9 @@
 
 ## Descargar
 
-**[⬇ Descargar Instalador (.exe)](https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.14.0/WhereMyTokens-Setup.exe)** — descarga y ejecuta, listo
+**[⬇ Descargar Instalador (.exe)](https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.15.0/WhereMyTokens-Setup.exe)** — descarga y ejecuta, listo
 
-**[⬇ Descargar ZIP portable](https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.14.0/WhereMyTokens-v1.14.0-win-x64.zip)** — no requiere instalación
+**[⬇ Descargar ZIP portable](https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.15.0/WhereMyTokens-v1.15.0-win-x64.zip)** — no requiere instalación
 
 Al descargar o instalar, aceptas el [Acuerdo de Licencia de Usuario Final (EULA)](EULA.txt).
 
@@ -83,7 +83,7 @@ Al descargar o instalar, aceptas el [Acuerdo de Licencia de Usuario Final (EULA)
 3. La aplicación se abre automáticamente y se ubica en la bandeja del sistema
 
 **Opción B — ZIP Portable** _(sin instalación)_
-1. Descarga `WhereMyTokens-v1.14.0-win-x64.zip` desde la página de releases
+1. Descarga `WhereMyTokens-v1.15.0-win-x64.zip` desde la página de releases
 2. Extrae el zip en cualquier ubicación
 3. Ejecuta `WhereMyTokens.exe`
 
@@ -126,7 +126,7 @@ Al descargar o instalar, aceptas el [Acuerdo de Licencia de Usuario Final (EULA)
 ### Personalización
 - **Tema Auto/Claro/Oscuro** — sigue la preferencia del sistema por defecto
 - **Visualización de costos** — USD o KRW con tasa de cambio configurable
-- **Floating usage widget** — ventana compacta de Quota Pace con soporte always-on-top; muéstrala u ocúltala desde el encabezado principal, el menú de bandeja, Settings o los controles del widget
+- **Floating usage widget** — ventana compacta de Quota Pace con soporte always-on-top; muéstrala u ocúltala desde el encabezado principal, el menú de bandeja, Settings o los controles del widget. Las animaciones waiting están desactivadas por defecto y se pueden reactivar en Settings
 - **Etiqueta de bandeja** — muestra % de uso, cantidad de tokens o costo directamente en la barra de tareas
 - **Gestión de proyectos** — oculta o excluye completamente proyectos del seguimiento
 - **Iniciar con Windows** — inicio automático opcional

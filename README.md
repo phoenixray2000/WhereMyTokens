@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.14.0/WhereMyTokens-Setup.exe"><strong>Download v1.14.0</strong></a>
+  <a href="https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.15.0/WhereMyTokens-Setup.exe"><strong>Download v1.15.0</strong></a>
   ·
   <a href="#features">Features</a>
   ·
@@ -59,11 +59,11 @@
 
 | Version | Date | Highlights |
 |---------|------|-----------|
+| **[v1.15.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.15.0)** | May 14 | Add a Settings toggle that keeps compact-widget waiting animations off by default while preserving syncing animation |
 | **[v1.14.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.14.0)** | May 11 | Add Claude OAuth refresh recovery, safer credential-aware API caching, clearer Claude refresh/login states, and floating widget hide/shortcut recovery |
 | **[v1.13.2](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.13.2)** | May 8 | Fix Codex weekly limit display so a reached 5-hour limit no longer forces the weekly window to 100% |
 | **[v1.13.1](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.13.1)** | May 7 | Add a main-header toggle for the floating Quota Pace widget and fix widget toolbar icon clicks that could be captured as drag gestures |
 | **[v1.13.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.13.0)** | May 7 | Add resilient Codex live usage syncing, safer API backoff, provider-specific Quota Pace health chips, and clearer fallback/loading states |
-| **[v1.12.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.12.0)** | May 6 | Add the floating Quota Pace widget, layout customization, time-elapsed usage bars, refreshed screenshots, and widget/settings hardening |
 
 [→ Full changelog](https://github.com/jeongwookie/WhereMyTokens/releases)
 
@@ -71,9 +71,9 @@
 
 ## Download
 
-**[⬇ Download Installer (.exe)](https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.14.0/WhereMyTokens-Setup.exe)** - just run and done
+**[⬇ Download Installer (.exe)](https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.15.0/WhereMyTokens-Setup.exe)** - just run and done
 
-**[⬇ Download Portable ZIP](https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.14.0/WhereMyTokens-v1.14.0-win-x64.zip)** - no install required
+**[⬇ Download Portable ZIP](https://github.com/jeongwookie/WhereMyTokens/releases/download/v1.15.0/WhereMyTokens-v1.15.0-win-x64.zip)** - no install required
 
 By downloading or installing, you agree to the [End-User License Agreement (EULA)](EULA.txt).
 
@@ -83,7 +83,7 @@ By downloading or installing, you agree to the [End-User License Agreement (EULA
 3. The app opens automatically and sits in your system tray
 
 **Option B — Portable ZIP** _(no install required)_
-1. Download `WhereMyTokens-v1.14.0-win-x64.zip` from the release page
+1. Download `WhereMyTokens-v1.15.0-win-x64.zip` from the release page
 2. Extract the zip anywhere
 3. Run `WhereMyTokens.exe`
 
@@ -127,7 +127,7 @@ By downloading or installing, you agree to the [End-User License Agreement (EULA
 ### Customization
 - **Auto/Light/Dark theme** — follows system preference by default
 - **Cost display** — USD or KRW with configurable exchange rate
-- **Floating usage widget** — compact Quota Pace window with always-on-top support; show/hide it from the main header, tray menu, Settings, or widget controls
+- **Floating usage widget** — compact Quota Pace window with always-on-top support; show/hide it from the main header, tray menu, Settings, or widget controls. Waiting animations are off by default and can be re-enabled in Settings
 - **Tray label** — show usage %, token count, or cost directly in the taskbar
 - **Project management** — hide or fully exclude projects from tracking
 - **Start with Windows** — optional auto-launch at login

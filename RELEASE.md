@@ -123,6 +123,7 @@ gh release create vX.Y.Z \
 
 | 버전 | 날짜 | 주요 변경 |
 |------|------|-----------|
+| v1.15.0 | 2026-05-14 | Add a Settings toggle for compact-widget waiting animations, default waiting motion to off to reduce visual interruption, and keep syncing states animated |
 | v1.14.0 | 2026-05-11 | Add Claude OAuth refresh recovery, credential-aware API cache invalidation, safer refresh write/cooldown handling, clearer Claude refresh/login states, and floating widget hide/shortcut recovery |
 | v1.13.2 | 2026-05-08 | Fix Codex weekly limit display by keeping 5-hour and weekly API windows independent, honoring remaining-percent values, and invalidating stale Codex usage cache |
 | v1.13.1 | 2026-05-07 | Add a main-header toggle for the floating Quota Pace widget, fix widget toolbar icon clicks being captured as drag gestures, and document the new control across README/Help |
