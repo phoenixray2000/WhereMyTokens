@@ -121,6 +121,9 @@ test('settings and widget integration guard malformed persisted values', () => {
   assert.match(ipcSource, /function normalizedSettingsPartial\(partial: unknown\)/);
   assert.match(ipcSource, /typeof record\.globalHotkey === 'string'/);
   assert.match(ipcSource, /typeof record\.compactWidgetEnabled === 'boolean'/);
+  assert.match(ipcSource, /compactWidgetWaitingAnimationEnabled: boolean/);
+  assert.match(ipcSource, /typeof record\.compactWidgetWaitingAnimationEnabled === 'boolean'/);
+  assert.match(ipcSource, /compactWidgetWaitingAnimationEnabled: false/);
   assert.match(ipcSource, /return \[\.\.\.new Set\(thresholds\)\]\.sort/);
   assert.match(ipcSource, /hasOwnProperty\.call\(record, 'compactWidgetBounds'\)/);
   assert.match(ipcSource, /normalizeSettings\(store\.store\)/);
@@ -143,6 +146,7 @@ test('settings and widget integration guard malformed persisted values', () => {
   assert.match(mainSource, /widgetWindow\.setAlwaysOnTop\(true\)/);
   assert.match(appSource, /handleToggleCompactWidget/);
   assert.match(appSource, /compactWidgetEnabled: !state\.settings\.compactWidgetEnabled/);
+  assert.match(appSource, /compactWidgetWaitingAnimationEnabled: next\.settings\?\.compactWidgetWaitingAnimationEnabled === true/);
   assert.match(mainViewSource, /PictureInPicture2/);
   assert.match(mainViewSource, /aria-pressed=\{compactWidgetEnabled\}/);
   assert.match(mainViewSource, /Show floating Quota Pace widget/);
@@ -154,10 +158,14 @@ test('settings and widget integration guard malformed persisted values', () => {
   assert.match(widgetSource, /dragSeqRef/);
   assert.match(widgetSource, /dragSeq !== dragSeqRef\.current/);
   assert.match(widgetSource, /const toolbarButtonStyle: React\.CSSProperties/);
+  assert.match(widgetSource, /animateWaiting=\{state\.settings\.compactWidgetWaitingAnimationEnabled === true\}/);
+  assert.match(widgetSource, /visualState === 'waiting' && !animateWaiting/);
   assert.match(widgetSource, /return `\$\{hours\}h \$\{minutes\}m`/);
   assert.match(widgetSource, /gridTemplateColumns: '24px minmax\(0, 1fr\) 38px 64px'/);
   assert.match(sectionsSource, /Array\.isArray\(value\) \? value : \[\]/);
   assert.match(settingsSource, /buildSettingsPatch\(s, baseSettings, latestSettings\)/);
+  assert.match(settingsSource, /compactWidgetWaitingAnimationEnabled/);
+  assert.match(settingsSource, /Waiting animation/);
   assert.match(settingsSource, /if \(sameSettingValue\(currentValue, settingValue\(latest, key\)\)\) continue/);
   assert.match(settingsSource, /Use Ctrl\+Shift or Ctrl\+Alt/);
 });
