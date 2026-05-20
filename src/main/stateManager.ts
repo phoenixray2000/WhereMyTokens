@@ -335,6 +335,7 @@ export class StateManager {
   private static readonly STARTUP_SCAN_BUDGET_MS = 2_500;
   private static readonly FOREGROUND_REFRESH_DELAY_MS = 750;
   private static readonly FOREGROUND_SCAN_BUDGET_MS = 2_500;
+  private static readonly FOREGROUND_WARMUP_DELAY_MS = 3_000;
   private static readonly WIDE_WATCHER_PROMOTION_DELAY_MS = 5_000;
   private static readonly STARTUP_WARMUP_DELAY_MS = 30_000;
   private static readonly STARTUP_GIT_DELAY_MS = 60_000;
@@ -1392,7 +1393,7 @@ export class StateManager {
       const partialHistoryScan = effectiveScanBudgetMs !== null && loaded.partial;
       const showHistoryWarmupBanner = allowStartupBudget && !initialRefreshDone && loaded.partial;
       const historyWarmupStartsAt = partialHistoryScan
-        ? this.scheduleHistoryWarmup()
+        ? this.scheduleHistoryWarmup(showHistoryWarmupBanner ? StateManager.STARTUP_WARMUP_DELAY_MS : StateManager.FOREGROUND_WARMUP_DELAY_MS)
         : null;
       if (!partialHistoryScan) this.clearHistoryWarmup();
       const sessionBuildSample = this.beginPerfSample();

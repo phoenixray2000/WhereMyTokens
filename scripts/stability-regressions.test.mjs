@@ -1103,10 +1103,12 @@ test('foreground refresh uses a scan budget while force refresh remains full', (
   const heavyBody = source.slice(heavyStart, heavyEnd);
 
   assert.match(scheduleBody, /this\.heavyRefresh\(false, false, StateManager\.FOREGROUND_SCAN_BUDGET_MS\)/);
+  assert.match(source, /FOREGROUND_WARMUP_DELAY_MS = 3_000/);
   assert.match(heavyBody, /scanBudgetMs: number \| null = null/);
   assert.match(heavyBody, /const effectiveScanBudgetMs = scanBudgetMs \?\? /);
   assert.match(heavyBody, /const partialHistoryScan = effectiveScanBudgetMs !== null && loaded\.partial/);
   assert.match(heavyBody, /const showHistoryWarmupBanner = allowStartupBudget && !initialRefreshDone && loaded\.partial/);
+  assert.match(heavyBody, /this\.scheduleHistoryWarmup\(showHistoryWarmupBanner \? StateManager\.STARTUP_WARMUP_DELAY_MS : StateManager\.FOREGROUND_WARMUP_DELAY_MS\)/);
   assert.match(heavyBody, /historyWarmupPending: showHistoryWarmupBanner/);
   assert.match(heavyBody, /historyWarmupStartsAt: showHistoryWarmupBanner \? historyWarmupStartsAt : null/);
   assert.doesNotMatch(heavyBody, /historyWarmupPending: partialHistoryScan/);
