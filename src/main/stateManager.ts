@@ -100,6 +100,7 @@ export interface AppState {
 }
 
 type WatcherProfile = 'wide' | 'recent' | 'off';
+type WatcherMode = 'auto' | 'wide' | 'recent';
 
 interface PerfSampleStart {
   wallNs: bigint;
@@ -316,6 +317,8 @@ export class StateManager {
   private heavyPending = false;
   private historyWarmupTimer: NodeJS.Timeout | null = null;
   private gitWarmupTimer: NodeJS.Timeout | null = null;
+  private foregroundRefreshTimer: NodeJS.Timeout | null = null;
+  private wideWatcherPromotionTimer: NodeJS.Timeout | null = null;
   private debugMemTimer: NodeJS.Timeout | null = null;
   private uiBusy = false;
   private uiVisible = false;
@@ -330,6 +333,9 @@ export class StateManager {
   private static readonly FAST_REFRESH_HIDDEN_MS = 300_000;
   private static readonly HEAVY_REFRESH_HIDDEN_MS = 900_000;
   private static readonly STARTUP_SCAN_BUDGET_MS = 2_500;
+  private static readonly FOREGROUND_REFRESH_DELAY_MS = 750;
+  private static readonly FOREGROUND_SCAN_BUDGET_MS = 2_500;
+  private static readonly WIDE_WATCHER_PROMOTION_DELAY_MS = 5_000;
   private static readonly STARTUP_WARMUP_DELAY_MS = 30_000;
   private static readonly STARTUP_GIT_DELAY_MS = 60_000;
   private static readonly STARTUP_CLAUDE_FILE_LIMIT = 48;
@@ -522,6 +528,10 @@ export class StateManager {
     if (this.fastDebounce) clearTimeout(this.fastDebounce);
     if (this.historyWarmupTimer) clearTimeout(this.historyWarmupTimer);
     if (this.gitWarmupTimer) clearTimeout(this.gitWarmupTimer);
+    if (this.foregroundRefreshTimer) clearTimeout(this.foregroundRefreshTimer);
+    if (this.wideWatcherPromotionTimer) clearTimeout(this.wideWatcherPromotionTimer);
+    this.foregroundRefreshTimer = null;
+    this.wideWatcherPromotionTimer = null;
     this.watcher?.close();
     this.bridgeWatcher.stop();
     this.jsonlCache.flushPersisted();
@@ -545,10 +555,45 @@ export class StateManager {
     if (this.uiVisible === visible) return;
     this.uiVisible = visible;
     this.startTimers();
-    this.startWatcher(visible ? 'popup:show' : 'popup:hide');
-    if (visible && this.state.initialRefreshComplete && !this.uiBusy) {
-      void this.heavyRefresh();
+    if (visible) {
+      this.startWatcher('popup:show:recent', 'recent');
+      if (this.state.initialRefreshComplete) {
+        this.scheduleForegroundRefresh();
+        this.scheduleWideWatcherPromotion();
+      }
+      return;
     }
+    this.clearForegroundTimers();
+    this.startWatcher('popup:hide', 'recent');
+  }
+
+  private clearForegroundTimers(): void {
+    if (this.foregroundRefreshTimer) clearTimeout(this.foregroundRefreshTimer);
+    if (this.wideWatcherPromotionTimer) clearTimeout(this.wideWatcherPromotionTimer);
+    this.foregroundRefreshTimer = null;
+    this.wideWatcherPromotionTimer = null;
+  }
+
+  private scheduleForegroundRefresh(): void {
+    if (this.foregroundRefreshTimer) clearTimeout(this.foregroundRefreshTimer);
+    this.foregroundRefreshTimer = setTimeout(() => {
+      this.foregroundRefreshTimer = null;
+      if (!this.uiVisible) return;
+      if (this.uiBusy) {
+        this.scheduleForegroundRefresh();
+        return;
+      }
+      void this.heavyRefresh(false, false, StateManager.FOREGROUND_SCAN_BUDGET_MS);
+    }, StateManager.FOREGROUND_REFRESH_DELAY_MS);
+  }
+
+  private scheduleWideWatcherPromotion(): void {
+    if (this.wideWatcherPromotionTimer) clearTimeout(this.wideWatcherPromotionTimer);
+    this.wideWatcherPromotionTimer = setTimeout(() => {
+      this.wideWatcherPromotionTimer = null;
+      if (!this.uiVisible) return;
+      this.startWatcher('popup:show:wide', 'wide');
+    }, StateManager.WIDE_WATCHER_PROMOTION_DELAY_MS);
   }
 
   private isPerfDebugEnabled(): boolean {
@@ -1141,14 +1186,15 @@ export class StateManager {
     return targets;
   }
 
-  private startWatcher(reason = 'refresh') {
+  private startWatcher(reason = 'refresh', mode: WatcherMode = 'auto') {
     this.watcher?.close();
     this.watcher = null;
 
     const provider = this.getSettings().provider ?? 'both';
     const watchTargets: string[] = [];
+    const useWideWatcher = mode === 'wide' || (mode === 'auto' && this.uiVisible);
 
-    if (this.uiVisible) {
+    if (useWideWatcher) {
       if ((provider === 'claude' || provider === 'both') && fs.existsSync(SESSIONS_DIR)) {
         watchTargets.push(SESSIONS_DIR);
       }
@@ -1265,7 +1311,7 @@ export class StateManager {
     this.onUpdate(this.state);
   }
 
-  private async heavyRefresh(force = false, allowStartupBudget = false) {
+  private async heavyRefresh(force = false, allowStartupBudget = false, scanBudgetMs: number | null = null) {
     const totalPerf = this.beginPerfSample();
     let apiPerf: PerfMetrics | null = null;
     let loadPerf: PerfMetrics | null = null;
@@ -1292,6 +1338,7 @@ export class StateManager {
       ]);
       apiPerf = this.finishPerfSample(apiSample);
       const initialRefreshDone = this.state.initialRefreshComplete;
+      const effectiveScanBudgetMs = scanBudgetMs ?? (allowStartupBudget && !initialRefreshDone ? StateManager.STARTUP_SCAN_BUDGET_MS : null);
       if (!force && initialRefreshDone && !this.uiVisible) {
         const sessionSample = this.beginPerfSample();
         const settings = this.getSettings();
@@ -1333,10 +1380,7 @@ export class StateManager {
         return;
       }
       const loadSample = this.beginPerfSample();
-      const loaded = await this.loadProviderSummaries(
-        force,
-        allowStartupBudget && !initialRefreshDone ? StateManager.STARTUP_SCAN_BUDGET_MS : null,
-      );
+      const loaded = await this.loadProviderSummaries(force, effectiveScanBudgetMs);
       loadPerf = this.finishPerfSample(loadSample);
       this.jsonlCache.flushPersisted();
       this.summaries = loaded.summaries;
@@ -1345,13 +1389,13 @@ export class StateManager {
       const settings = this.getSettings();
       const derived = this.computeDerivedUsage(settings);
       const codexAccount = readCodexAccountState();
-      const startupPartial = allowStartupBudget && !initialRefreshDone && loaded.partial;
-      const historyWarmupStartsAt = startupPartial
+      const partialHistoryScan = effectiveScanBudgetMs !== null && loaded.partial;
+      const historyWarmupStartsAt = partialHistoryScan
         ? this.scheduleHistoryWarmup()
         : null;
-      if (!startupPartial) this.clearHistoryWarmup();
+      if (!partialHistoryScan) this.clearHistoryWarmup();
       const sessionBuildSample = this.beginPerfSample();
-      sessionResult = startupPartial
+      sessionResult = partialHistoryScan
         ? this.buildScopedSessionInfosDetailed(loaded.summaries)
         : this.buildScopedSessionInfosDetailed(loaded.summaries);
       let sessions = sessionResult.sessions;
@@ -1365,7 +1409,7 @@ export class StateManager {
         autoLimits: this.autoLimits,
         codexAccount,
         initialRefreshComplete: true,
-        historyWarmupPending: startupPartial,
+        historyWarmupPending: partialHistoryScan,
         historyWarmupStartsAt,
         lastUpdated: Date.now(),
         apiConnected: this.apiConnected,
@@ -1382,14 +1426,16 @@ export class StateManager {
       if (!initialRefreshDone && !force) {
         this.scheduleGitWarmup();
         checkAlerts(derived.limits, settings.alertThresholds, settings.enableAlerts, settings.provider, {
-          deferCodexLocalLog: startupPartial,
+          deferCodexLocalLog: partialHistoryScan,
         });
         await this.logMemorySnapshot('heavyRefresh:end', loaded.scannedFiles);
         if (!this.uiVisible) this.startWatcher('heavyRefresh:startupsync');
+        else this.scheduleWideWatcherPromotion();
         this.logPerfTrace('heavyRefresh', totalPerf, {
           force,
           scannedFiles: loaded.scannedFiles,
           partial: loaded.partial,
+          scanBudgetMs: effectiveScanBudgetMs,
           ...(apiPerf ? this.perfFields('api', apiPerf) : {}),
           ...(loadPerf ? this.perfFields('load', loadPerf) : {}),
           ...(sessionPerf ? this.perfFields('sessions', sessionPerf) : {}),
@@ -1413,7 +1459,7 @@ export class StateManager {
         autoLimits: this.autoLimits,
         codexAccount,
         initialRefreshComplete: true,
-        historyWarmupPending: startupPartial,
+        historyWarmupPending: partialHistoryScan,
         historyWarmupStartsAt,
         lastUpdated: Date.now(),
         apiConnected: this.apiConnected,
@@ -1429,7 +1475,7 @@ export class StateManager {
       this.onUpdate(this.state);
 
       checkAlerts(derived.limits, settings.alertThresholds, settings.enableAlerts, settings.provider, {
-        deferCodexLocalLog: startupPartial,
+        deferCodexLocalLog: partialHistoryScan,
       });
       await this.logMemorySnapshot('heavyRefresh:end', loaded.scannedFiles);
       if (!this.uiVisible) this.startWatcher('heavyRefresh:hidden');
@@ -1437,6 +1483,7 @@ export class StateManager {
         force,
         scannedFiles: loaded.scannedFiles,
         partial: loaded.partial,
+        scanBudgetMs: effectiveScanBudgetMs,
         ...(apiPerf ? this.perfFields('api', apiPerf) : {}),
         ...(loadPerf ? this.perfFields('load', loadPerf) : {}),
         ...(sessionPerf ? this.perfFields('sessions', sessionPerf) : {}),
