@@ -223,7 +223,7 @@ test('startup refresh uses lightweight session bootstrapping and API status labe
   const mainSource = fs.readFileSync(path.resolve('src', 'main', 'stateManager.ts'), 'utf8');
   const rendererSource = fs.readFileSync(path.resolve('src', 'renderer', 'views', 'MainView.tsx'), 'utf8');
 
-  assert.match(mainSource, /buildScopedSessionInfosDetailed\(loaded\.summaries\)/);
+  assert.match(mainSource, /buildScopedSessionInfosDetailed\(nextSummaries\)/);
   assert.match(mainSource, /buildStartupPriorityFiles/);
   assert.match(mainSource, /historyWarmupStartsAt/);
   assert.match(rendererSource, /apiStatusLabel/);

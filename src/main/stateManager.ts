@@ -594,6 +594,7 @@ export class StateManager {
       this.wideWatcherPromotionTimer = null;
       if (!this.uiVisible) return;
       this.startWatcher('popup:show:wide', 'wide');
+      this.scheduleForegroundRefresh();
     }, StateManager.WIDE_WATCHER_PROMOTION_DELAY_MS);
   }
 
@@ -901,12 +902,12 @@ export class StateManager {
     });
   }
 
-  private scheduleHistoryWarmup(delayMs = StateManager.STARTUP_WARMUP_DELAY_MS): number {
+  private scheduleHistoryWarmup(delayMs = StateManager.STARTUP_WARMUP_DELAY_MS, allowHiddenFullScan = false): number {
     if (this.historyWarmupTimer) clearTimeout(this.historyWarmupTimer);
     const startsAt = Date.now() + delayMs;
     this.historyWarmupTimer = setTimeout(() => {
       this.historyWarmupTimer = null;
-      void this.heavyRefresh();
+      void this.heavyRefresh(false, false, null, allowHiddenFullScan);
     }, delayMs);
     return startsAt;
   }
@@ -1312,7 +1313,12 @@ export class StateManager {
     this.onUpdate(this.state);
   }
 
-  private async heavyRefresh(force = false, allowStartupBudget = false, scanBudgetMs: number | null = null) {
+  private async heavyRefresh(
+    force = false,
+    allowStartupBudget = false,
+    scanBudgetMs: number | null = null,
+    allowHiddenFullScan = false,
+  ) {
     const totalPerf = this.beginPerfSample();
     let apiPerf: PerfMetrics | null = null;
     let loadPerf: PerfMetrics | null = null;
@@ -1340,7 +1346,7 @@ export class StateManager {
       apiPerf = this.finishPerfSample(apiSample);
       const initialRefreshDone = this.state.initialRefreshComplete;
       const effectiveScanBudgetMs = scanBudgetMs ?? (allowStartupBudget && !initialRefreshDone ? StateManager.STARTUP_SCAN_BUDGET_MS : null);
-      if (!force && initialRefreshDone && !this.uiVisible) {
+      if (!force && !allowHiddenFullScan && initialRefreshDone && !this.uiVisible) {
         const sessionSample = this.beginPerfSample();
         const settings = this.getSettings();
         const derived = this.computeDerivedUsage(settings);
@@ -1384,22 +1390,29 @@ export class StateManager {
       const loaded = await this.loadProviderSummaries(force, effectiveScanBudgetMs);
       loadPerf = this.finishPerfSample(loadSample);
       this.jsonlCache.flushPersisted();
-      this.summaries = loaded.summaries;
-      this.codexRateLimits = loaded.codexRateLimits;
+      const partialHistoryScan = effectiveScanBudgetMs !== null && loaded.partial;
+      const nextSummaries = partialHistoryScan && initialRefreshDone
+        ? new Map([...this.summaries, ...loaded.summaries])
+        : loaded.summaries;
+      const nextCodexRateLimits = partialHistoryScan && initialRefreshDone
+        ? this.mergeCodexRateLimits(this.codexRateLimits, loaded.codexRateLimits ?? undefined)
+        : loaded.codexRateLimits;
+      this.summaries = nextSummaries;
+      this.codexRateLimits = nextCodexRateLimits;
 
       const settings = this.getSettings();
       const derived = this.computeDerivedUsage(settings);
       const codexAccount = readCodexAccountState();
-      const partialHistoryScan = effectiveScanBudgetMs !== null && loaded.partial;
       const showHistoryWarmupBanner = allowStartupBudget && !initialRefreshDone && loaded.partial;
       const historyWarmupStartsAt = partialHistoryScan
-        ? this.scheduleHistoryWarmup(showHistoryWarmupBanner ? StateManager.STARTUP_WARMUP_DELAY_MS : StateManager.FOREGROUND_WARMUP_DELAY_MS)
+        ? this.scheduleHistoryWarmup(
+            showHistoryWarmupBanner ? StateManager.STARTUP_WARMUP_DELAY_MS : StateManager.FOREGROUND_WARMUP_DELAY_MS,
+            true,
+          )
         : null;
       if (!partialHistoryScan) this.clearHistoryWarmup();
       const sessionBuildSample = this.beginPerfSample();
-      sessionResult = partialHistoryScan
-        ? this.buildScopedSessionInfosDetailed(loaded.summaries)
-        : this.buildScopedSessionInfosDetailed(loaded.summaries);
+      sessionResult = this.buildScopedSessionInfosDetailed(nextSummaries);
       let sessions = sessionResult.sessions;
       sessionPerf = this.finishPerfSample(sessionBuildSample);
       const partialCodeOutputStats = this.buildCodeOutputStats(sessions, this.state.repoGitStats);
