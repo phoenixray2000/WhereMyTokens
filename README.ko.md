@@ -142,7 +142,7 @@ macOS 사용자는 별도 공개 저장소를 사용하세요:
 - **Git 기반 지표** — 커밋 수, 순 라인 변경, **$/100 Added** (100 추가 라인당 비용)
 - **Today vs All-time** — 오늘의 추가 라인당 실제 비용과 전체 평균 비교
 - **Output 성장 그래프** — 최근 7일 로컬 날짜별로 전체 누적 순 라인 증가 흐름 표시
-- **현재 세션 repo 범위** — Code Output은 현재 추적 중인 세션에 연결된 repo 기준으로 집계된다는 라벨을 함께 표시
+- **영구 추적 repo 범위** — Code Output은 최근 세션 유무와 관계없이 저장된 추적 repo 전체를 집계합니다. 프로젝트 제외는 되돌릴 수 있으며 일시적으로 접근할 수 없는 repo의 이력도 유지합니다
 - **브랜치 반영 전체 기간** — Code Output의 전체 기간은 로컬 브랜치 전체의 커밋과 라인 변경을 로컬 git 작성자 이메일 기준으로 집계
 - **자동 발견** — Claude 프로젝트는 `~/.claude/projects/`에서 agent 사용 로그까지 포함하고, Codex 세션은 `~/.codex/sessions/`, `~/.codex/archived_sessions/`, `~/.codex/session-cleanup-archive/`에서 자동 포함하며, Antigravity는 실행 중인 로컬 language server의 cascade를 local RPC로 읽습니다
 - **본인 커밋만** — `git config user.email` 기준 필터링

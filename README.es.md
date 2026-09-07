@@ -139,7 +139,7 @@ Al descargar o instalar, aceptas el [Acuerdo de Licencia de Usuario Final (EULA)
 - **Métricas basadas en Git** — commits, líneas netas cambiadas, **$/100 Added** (costo por 100 líneas añadidas)
 - **Hoy vs todo el tiempo** — hoy muestra el costo real por línea añadida con el promedio para comparación
 - **Gráfico de crecimiento de Output** — muestra el crecimiento acumulado de líneas netas en los últimos 7 días locales
-- **Ámbito de repos de la sesión actual** — Code Output ahora etiqueta que los totales git se calculan sobre los repos vinculados a las sesiones que estás rastreando
+- **Ámbito persistente de repositorios** — Code Output agrega los repositorios registrados sin depender de las sesiones recientes. La exclusión de proyectos es reversible y se conserva el historial de repositorios temporalmente inaccesibles
 - **Histórico por ramas** — Code Output histórico cuenta commits y cambios de líneas en todas las ramas locales, usando tu email local de git
 - **Descubrimiento automático** — proyectos Claude desde `~/.claude/projects/` incluyendo logs agent, sesiones Codex desde `~/.codex/sessions/`, `~/.codex/archived_sessions/`, `~/.codex/session-cleanup-archive/`, y cascades de Antigravity desde el language server local vía local RPC
 - **Solo tus commits** — filtrado por `git config user.email`

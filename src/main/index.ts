@@ -13,6 +13,7 @@ import { createTaskbarQuotaHelperManager } from './taskbarQuotaHelper';
 import { buildTaskbarQuotaSnapshot } from './taskbarQuotaSnapshot';
 import { addNotification } from './notificationHistory';
 import { openUsageIndex } from './usageIndex';
+import { reconcileUsagePricingAtStartup } from './usagePricingStartup';
 import { launchClaudeLogin } from './claudeLoginLauncher';
 import type { ClaudeLoginLaunchResult } from '../shared/claudeLogin';
 
@@ -763,6 +764,21 @@ app.whenReady().then(async () => {
   }
 
   const usageIndex = await openUsageIndex(path.join(app.getPath('userData'), 'usage-index.sqlite'));
+  try {
+    const revisions = await reconcileUsagePricingAtStartup({
+      databasePath: path.join(app.getPath('userData'), 'usage-index.sqlite'),
+      backupDirectory: path.join(app.getPath('userData'), 'usage-pricing-backups'),
+    });
+    const revisionKey = revisions.map(r => `${r.revisionId}:${r.signature}`).join('|');
+    const metadata = store as unknown as Store<Record<string, unknown>>;
+    if (metadata.get('_startupStatePricingRevision') !== revisionKey) {
+      metadata.delete('_startupStateSnapshot');
+      metadata.set('_startupStatePricingRevision', revisionKey);
+    }
+  } catch (error) {
+    // No completion receipt is committed on failure; retry at the next start.
+    appendCrashLog('usage-pricing-update-failed', buildErrorPayload(error));
+  }
   const manager = new StateManager(store, (state) => {
     updateClaudeLoginNotice(state);
     updateTray(state);

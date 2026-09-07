@@ -112,8 +112,7 @@ function saveStats(cwd: string, stats: GitStats): void {
     const key = normalizeGitCwdKey(cwd);
     const normalizedStats = normalizeStatsPaths(stats);
     const current = store.get('cache') ?? {};
-    const preferred = preferGitStats(current[key], normalizedStats);
-    store.set('cache', { ...current, [key]: preferred ?? normalizedStats });
+    store.set('cache', { ...current, [key]: normalizedStats });
     const repoKey = normalizedStats.gitCommonDir ?? normalizedStats.toplevel ?? key;
     getGitOutputLedgerStore().mergeRepoDays(repoKey, normalizedStats.dailyAll);
   } catch { /* 저장 실패는 무시 */ }
@@ -373,7 +372,7 @@ async function collectStats(cwd: string): Promise<GitStats | null> {
 
     // 전체 numstat — 가장 무거움, shortstat으로 대체
     const allStat = await execGitAsync(['log', '--branches', '--format=', '--numstat', ...authorArgs], cwd, 30000);
-    const dailyAllLog = await execGitAsync(['log', '--branches', '--date=short', `--format=${DAILY_LOG_DATE_MARKER}%ad`, '--numstat', ...authorArgs], cwd, 30000).catch(() => '');
+    const dailyAllLog = await execGitAsync(['log', '--branches', '--date=short', `--format=${DAILY_LOG_DATE_MARKER}%ad`, '--numstat', ...authorArgs], cwd, 30000);
     const total = parseNumstat(allStat);
     const dailyAll = parseDailyAllLog(dailyAllLog);
 

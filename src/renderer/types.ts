@@ -230,7 +230,7 @@ export interface CodexAccountState {
 }
 
 export interface UsageIndexCoverage {
-  state: 'complete' | 'incomplete';
+  state: 'complete' | 'updating' | 'incomplete';
   requiredSourceCount: number;
   indexedSourceCount: number;
   pendingSourceCount: number;

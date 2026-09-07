@@ -139,7 +139,7 @@ macOS 用户请使用单独的公开仓库:
 - **Git 指标** — 提交数、净变更行数、**$/100 Added**（每100行新增的成本）
 - **今日 vs 全部** — 今日显示每新增行实际成本与历史平均对比
 - **Output 增长图** — 按最近 7 个本地日期显示全时段累计净行数增长
-- **当前会话 repo 范围** — Code Output 会明确标注其 git 汇总是基于当前正在追踪的会话关联 repo
+- **持久仓库范围** — Code Output 按持续保留的仓库目录汇总，不依赖最近会话是否仍存在；项目排除可随时撤销，暂时不可访问的仓库历史仍保留
 - **分支感知的全时段** — Code Output 的全时段会按本地 git 作者邮箱统计所有本地分支的提交和行变更
 - **自动发现** — Claude 项目来自 `~/.claude/projects/` 并包含 agent 使用日志，Codex 会话来自 `~/.codex/sessions/`、`~/.codex/archived_sessions/`、`~/.codex/session-cleanup-archive/`，Antigravity 会话来自运行中的 IDE local RPC cascade
 - **仅统计您的提交** — 按 `git config user.email` 过滤

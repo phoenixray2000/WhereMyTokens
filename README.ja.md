@@ -142,7 +142,7 @@ macOS ユーザーは別の公開リポジトリを使用してください:
 - **Git ベース指標** — コミット数、純変更行数、**$/100 Added**（100 追加行あたりのコスト）
 - **Today vs All-time** — 今日の追加行あたり実コストと全期間平均を比較
 - **Output 成長グラフ** — 直近 7 日のローカル日付ごとに全期間累積の純増行数を表示
-- **現在のセッション repo 範囲** — Code Output は現在追跡中のセッションに結び付いた repo 集計であることをラベル表示
+- **永続的な repo 範囲** — Code Output は最近のセッションの有無に依存せず、保存された追跡対象 repo 全体を集計します。プロジェクト除外は元に戻せ、一時的にアクセスできない repo の履歴も保持します
 - **ブランチ対応の全期間** — Code Output の全期間は、ローカルブランチ全体のコミットと行変更をローカル git author email 基準で集計
 - **自動検出** — Claude プロジェクトは `~/.claude/projects/` から agent 使用ログも含め、Codex セッションは `~/.codex/sessions/`、`~/.codex/archived_sessions/`、`~/.codex/session-cleanup-archive/` から自動検出し、Antigravity は実行中のローカル language server の cascade を local RPC で読み取ります
 - **自分のコミットのみ** — `git config user.email` でフィルタリング

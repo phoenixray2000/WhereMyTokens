@@ -326,6 +326,7 @@
       }
     },
     "header": {
+      "estimatedCost": "推定コスト",
       "periodToday": "今日",
       "periodAll": "全期間",
       "hideCompactWidget": "フローティング Quota Pace ウィジェットを非表示",
@@ -467,6 +468,8 @@
       "usageIndexHealthBanner": "使用履歴インデックスの状態バナー"
     },
     "usageIndexCoverage": {
+      "failureTitle": "使用量の更新に失敗しました",
+      "failureBody": "一部の使用量ソースを読み取れませんでした。既存の集計は保持されています。{{failures}}",
       "title": "使用履歴をインデックス中",
       "discovering": "使用ソースを検出しています。",
       "progress": "{{indexed}}/{{required}} 件のソースをインデックス済み。",

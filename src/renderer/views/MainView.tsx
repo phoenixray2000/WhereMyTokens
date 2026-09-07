@@ -746,6 +746,7 @@ const HeaderMetrics = React.memo(function HeaderMetrics({
               )}
             </div>
           )}
+          <div style={{ fontSize: 10, color: C.headerSub, marginBottom: 4 }}>{t('mainView.header.estimatedCost')}</div>
           <div style={{ fontSize: 28, fontWeight: 800, color: C.headerText, lineHeight: 1, fontFamily: C.fontMono, whiteSpace: 'nowrap' }}>
             {fmtCost(cost, currency, usdToKrw)}
           </div>
@@ -1702,10 +1703,10 @@ const IndexCoverageBanner = React.memo(function IndexCoverageBanner({ coverage }
       color: C.textDim,
     }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: C.headerAccent, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-        {t('mainView.usageIndexCoverage.title')}
+        {t(coverage.failedSourceCount > 0 ? 'mainView.usageIndexCoverage.failureTitle' : 'mainView.usageIndexCoverage.title')}
       </div>
       <div style={{ fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>
-        {t('mainView.usageIndexCoverage.body', { progress, failures })}
+        {t(coverage.failedSourceCount > 0 ? 'mainView.usageIndexCoverage.failureBody' : 'mainView.usageIndexCoverage.body', { progress, failures })}
       </div>
     </div>
   );

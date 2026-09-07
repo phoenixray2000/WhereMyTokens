@@ -326,6 +326,7 @@
       }
     },
     "header": {
+      "estimatedCost": "Estimated cost",
       "periodToday": "today",
       "periodAll": "all",
       "hideCompactWidget": "Hide floating Quota Pace widget",
@@ -421,6 +422,8 @@
       "body": "Historical totals are using recent fallback data until the local usage ledger is rebuilt from Settings."
     },
     "usageIndexCoverage": {
+      "failureTitle": "Usage Update Failed",
+      "failureBody": "Some usage sources could not be read. Existing totals are preserved.{{failures}}",
       "title": "Indexing Usage History",
       "discovering": "Discovering usage sources.",
       "progress": "{{indexed}}/{{required}} sources indexed.",
