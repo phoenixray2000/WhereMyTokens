@@ -59,6 +59,8 @@ Git output uses a separate ledger of committed local-branch activity. Its schema
 
 Code Output, Trend net lines, and category breakdowns apply the same repository scope. Project exclusion is a reversible query filter; a selected scope with no repositories returns zero rather than all repositories. Removing an exclusion restores retained history. Scanning uses the configured local Git author email when available; human-authored commits are included and model/provider selection does not attribute Git output to a particular AI session.
 
+Git log output is parsed as a stream into counters and daily category buckets, including recent-window queries. Full history is scanned once for all-time lines and daily buckets, so output larger than the child-process buffered-output limit remains collectable. Only a successful process exit may update the cache and ledger; timeout, process, or parsing failures retain the last successful statistics and emit a diagnostic. A later successful ordinary scan refreshes Git history without resetting or rewriting the usage index.
+
 ## Architecture and bounded work
 
 The path is provider discovery → one source scanner → `UsageSourceBatch` → transactional `DefaultUsageIndex` storage → source-attributed buckets and UI queries. Quantity decisions are made before extraction/pricing and are shared by all projections. This uses the existing SQLite index and its in-memory test counterpart, without another ledger or service.
