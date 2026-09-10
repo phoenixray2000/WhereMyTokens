@@ -992,17 +992,65 @@ export class SqliteUsageIndexStorage implements UsageIndexStorage {
   }
 
   private applyBucketDeltas(deltas: Iterable<UsageBucketDelta>): void {
-    const read = this.database.prepare(`
+    applyUsageBucketDeltas(this.database, deltas);
+  }
+
+  private replaceProjects(source: UsageSourceDescriptor): void {
+    this.database.prepare('DELETE FROM usage_source_project WHERE source_id = ?').run(source.sourceId);
+    const insert = this.database.prepare(
+      'INSERT INTO usage_source_project (source_id, project_key) VALUES (?, ?)',
+    );
+    for (const projectKey of source.projectKeys ?? []) insert.run(source.sourceId, projectKey);
+  }
+
+  private transaction(work: () => void): void {
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      work();
+      this.database.exec('COMMIT');
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  private assertOpen(): void {
+    if (this.closed) throw new Error('SqliteUsageIndexStorage is closed');
+  }
+
+  private addEntryProjectionRow(builder: UsageEntryProjectionBuilder, row: EntryProjectionRow): void {
+    if (!isProviderId(row.provider)) throw new Error(`Invalid provider ${row.provider} in UsageIndex entry`);
+    builder.add({
+      timestampMs: row.timestamp_ms,
+      provider: row.provider,
+      model: row.model,
+      inputTokens: row.input_tokens,
+      outputTokens: row.output_tokens,
+      cacheCreationTokens: row.cache_creation_tokens,
+      cacheReadTokens: row.cache_read_tokens,
+      costUSD: row.cost_usd,
+      cacheSavingsUSD: row.cache_savings_usd,
+    });
+  }
+}
+
+export function usageIndexSchemaVersion(): number {
+  return USAGE_INDEX_SCHEMA_VERSION;
+}
+
+/** Shared transactional bucket updater for ingestion and certified historical corrections. */
+export function applyUsageBucketDeltas(database: DatabaseSync, deltas: Iterable<UsageBucketDelta>): void {
+    const read = database.prepare(`
       SELECT * FROM usage_bucket
       WHERE source_id = ? AND provider = ? AND model = ?
         AND bucket_kind = ? AND bucket_start_ms = ?
     `);
-    const remove = this.database.prepare(`
+    const remove = database.prepare(`
       DELETE FROM usage_bucket
       WHERE source_id = ? AND provider = ? AND model = ?
         AND bucket_kind = ? AND bucket_start_ms = ?
     `);
-    const upsert = this.database.prepare(`
+    const upsert = database.prepare(`
       INSERT INTO usage_bucket (
         source_id, provider, model, bucket_kind, bucket_start_ms,
         request_count, input_tokens, output_tokens, cache_creation_tokens,
@@ -1071,46 +1119,3 @@ export class SqliteUsageIndexStorage implements UsageIndexStorage {
       );
     }
   }
-
-  private replaceProjects(source: UsageSourceDescriptor): void {
-    this.database.prepare('DELETE FROM usage_source_project WHERE source_id = ?').run(source.sourceId);
-    const insert = this.database.prepare(
-      'INSERT INTO usage_source_project (source_id, project_key) VALUES (?, ?)',
-    );
-    for (const projectKey of source.projectKeys ?? []) insert.run(source.sourceId, projectKey);
-  }
-
-  private transaction(work: () => void): void {
-    this.database.exec('BEGIN IMMEDIATE');
-    try {
-      work();
-      this.database.exec('COMMIT');
-    } catch (error) {
-      this.database.exec('ROLLBACK');
-      throw error;
-    }
-  }
-
-  private assertOpen(): void {
-    if (this.closed) throw new Error('SqliteUsageIndexStorage is closed');
-  }
-
-  private addEntryProjectionRow(builder: UsageEntryProjectionBuilder, row: EntryProjectionRow): void {
-    if (!isProviderId(row.provider)) throw new Error(`Invalid provider ${row.provider} in UsageIndex entry`);
-    builder.add({
-      timestampMs: row.timestamp_ms,
-      provider: row.provider,
-      model: row.model,
-      inputTokens: row.input_tokens,
-      outputTokens: row.output_tokens,
-      cacheCreationTokens: row.cache_creation_tokens,
-      cacheReadTokens: row.cache_read_tokens,
-      costUSD: row.cost_usd,
-      cacheSavingsUSD: row.cache_savings_usd,
-    });
-  }
-}
-
-export function usageIndexSchemaVersion(): number {
-  return USAGE_INDEX_SCHEMA_VERSION;
-}

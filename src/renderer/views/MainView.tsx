@@ -5,6 +5,7 @@ import { AppState, SessionInfo } from '../types';
 import type { ProviderQuotaSource, ProviderQuotaStatus } from '../../shared/quotaTypes';
 import { quotaElapsedPct } from '../../shared/quotaDomain';
 import { useTheme } from '../ThemeContext';
+import AccountingRevisionNotice from '../components/AccountingRevisionNotice';
 import { fmtTokens, fmtCost, fmtRelative, modelColor, quotaPctBarColor, quotaSourceBadgeToneStyle } from '../theme';
 // Plain (non-component) helper functions below call the i18next singleton's `.t()` directly
 // (same pattern as limitDisplay.ts), since React hooks cannot be used outside components.
@@ -2309,6 +2310,7 @@ export default function MainView({ state, onNav, onQuit, onRefresh, onScrollActi
         <HeaderMetrics state={state} onQuit={onQuit} onToggleCompactWidget={onToggleCompactWidget} onToggleTaskbarQuota={onToggleTaskbarQuota} />
       </RenderErrorBoundary>
       <div ref={scrollRef} onScroll={handleScroll} style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingBottom: 8, overflowAnchor: 'none' }}>
+        <AccountingRevisionNotice />
         {state.usageIndexHealth.state !== 'ready' && (
           <RenderErrorBoundary label={t('mainView.errorBoundary.usageIndexHealthBanner')}>
             <UsageIndexHealthBanner health={state.usageIndexHealth} />

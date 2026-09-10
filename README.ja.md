@@ -73,11 +73,11 @@
 
 | バージョン | 日付 | 主な変更 |
 |-----------|------|--------|
+| **[v1.24.5](docs/usage-accounting.md#automatic-historical-accounting-revision)** | 2026-09-10 | ローカルビルド：確認済みの Codex 履歴の過大計上を自動修正し、バックアップ、再開可能なソース別記録、結果と再検証画面を提供。 |
 | **[v1.24.4](docs/usage-accounting.md)** | 2026-09-10 | ローカルビルド：Codex のスレッドと通知の累積カウンター混在による費用の過大計上を修正し、ターン切替・再起動時の基準を保持。 |
 | **[v1.24.3](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.3)** | 8/27 | Windows で現在と legacy の Antigravity language server を検出し、provider が報告する shared Gemini / Claude・GPT quota group を優先表示。旧 server のモデル別 quota fallback も維持 |
 | **[v1.24.2](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.2)** | 8/10 | Claude login の期限切れ・拒否を notification と app 内 action で案内し、公式 CLI login を開いて credential 変更後に自動再試行。以前の quota を保持しても login 問題を隠さず、credential の更新・書き込みは行いません |
 | **[v1.24.1](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.1)** | 8/10 | 既存の Claude Code credential はあるが新しい statusLine がない Claude Desktop 利用時の quota を復旧。公式 statusLine 優先、token refresh/write 廃止、Anthropic 固定 host、auth-bound cache、非変更 test を追加 |
-| **[v1.24.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.0)** | 8/10 | Claude quota を公式のローカル `statusLine` に移行し、Claude OAuth credential へのアクセスと直接 usage polling を削除。custom statusLine の保持と、最小化した atomic snapshot・reset-aware cache も追加 |
 
 [→ 全変更履歴](https://github.com/jeongwookie/WhereMyTokens/releases)
 

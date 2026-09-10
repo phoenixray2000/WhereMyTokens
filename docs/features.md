@@ -48,3 +48,7 @@ WhereMyTokens is a local-first Windows tray app for AI coding usage observabilit
 - Dashboard layout controls for hiding or reordering optional cards.
 - Project hide and exclude controls backed by the same canonical usage query path.
 - Optional start with Windows.
+
+## Historical statistics correction
+
+On upgrade, a background check corrects proven Codex counter-origin overcounts after making a local backup. The result reports corrected and unverified sources separately. Details and a recheck action remain available under Settings → Data after the main-view notice is dismissed. Unavailable or incomplete history keeps its previous estimate; this is separate from Reset index.

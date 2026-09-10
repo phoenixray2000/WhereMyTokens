@@ -72,11 +72,11 @@
 
 | 版本 | 日期 | 主要变更 |
 |------|------|--------|
+| **[v1.24.5](docs/usage-accounting.md#automatic-historical-accounting-revision)** | 2026-09-10 | 本地构建：自动核对并修正可证实的 Codex 历史误记，提供备份、可恢复的逐来源修订记录、结果详情和重新检查入口。 |
 | **[v1.24.4](docs/usage-accounting.md)** | 2026-09-10 | 本地构建：修复 Codex 线程与通知累计计数混用导致的费用膨胀，跨轮次和重启保持正确计数基准。 |
 | **[v1.24.3](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.3)** | 8/27 | 在 Windows 同时检测当前与 legacy Antigravity language server，优先显示 provider 报告的 shared Gemini、Claude/GPT quota groups，并保留旧 server 的逐模型 quota fallback |
 | **[v1.24.2](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.2)** | 8/10 | 通过 Windows 通知和应用内操作提示 Claude 登录过期或被拒绝，打开官方 CLI 登录，并在 credential 变更后自动重试。保留旧 quota 时仍会显示登录问题，且不会刷新或写入 credential |
 | **[v1.24.1](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.1)** | 8/10 | 在已有 Claude Code credential 但没有新 statusLine 的 Claude Desktop 使用中恢复 quota；继续优先官方 statusLine，并加入固定 host、auth-bound cache 与 credential 不变测试 |
-| **[v1.24.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.0)** | 8/10 | 将 Claude quota 迁移到官方本地 `statusLine`，移除 Claude OAuth credential 访问与直接 usage polling，并保留 custom statusLine，加入最小化 atomic snapshot 与 reset-aware cache |
 
 [→ 完整更新日志](https://github.com/jeongwookie/WhereMyTokens/releases)
 

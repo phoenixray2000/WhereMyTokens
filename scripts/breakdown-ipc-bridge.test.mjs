@@ -95,3 +95,16 @@ test('registerIpcHandlers rejects invalid breakdown:get payloads', async () => {
     /invalid breakdown request/,
   );
 });
+
+test('historical correction IPC never invokes reset or provider refresh',async()=>{
+  const handlers=new Map();let reset=0,refresh=0,recheck=0,dismissed=0;
+  const status={state:'complete',checkedSources:1,totalSources:1,notice:true,report:null};
+  registerIpcHandlers({ipcMain:{handle:(channel,handler)=>handlers.set(channel,handler)},store:{store:{}},getState:()=>({}),
+    forceRefresh:async()=>{refresh++;},resetUsageIndex:async()=>{reset++;},applySettingsChange:()=>{},
+    getAccountingRevision:()=>status,retryAccountingRevision:()=>{recheck++;return {...status,state:'running'};},
+    dismissAccountingRevision:()=>{dismissed++;return {...status,notice:false};}});
+  assert.equal(handlers.get('usage-accounting:get')().notice,true);
+  assert.equal(handlers.get('usage-accounting:retry')().state,'running');
+  assert.equal(handlers.get('usage-accounting:dismiss')().notice,false);
+  assert.equal(recheck,1);assert.equal(dismissed,1);assert.equal(reset,0);assert.equal(refresh,0);
+});

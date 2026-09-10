@@ -1602,7 +1602,7 @@ export class StateManager {
   async resetUsageIndex(): Promise<void> {
     this.clearHistoryWarmup();
     this.clearGitWarmup();
-    await this.usageIndex.reset();
+    await this.refreshScheduler.runExclusive(async () => { await this.usageIndex.reset(); });
     this.usageIndexProjections = [];
     this.usageIndexCoverage = incompleteUsageIndexCoverage();
     this.state = {
@@ -1619,6 +1619,20 @@ export class StateManager {
       reason: 'manual',
       force: true,
       includeFullHistory: true,
+    });
+  }
+
+  async runUsageMaintenance<T>(work: () => Promise<T>): Promise<T> {
+    return this.refreshScheduler.runExclusive(async () => {
+      try { return await work(); }
+      finally {
+        const settings = this.getSettings();
+        await this.refreshUsageIndexProjections(settings);
+        const derived = this.computeDerivedUsage(settings);
+        this.state = { ...this.state, usage: derived.usage, usageTrend: this.buildUsageTrend(),
+          usageIndexCoverage: this.usageIndexCoverage, lastUpdated: Date.now() };
+        this.publishState();
+      }
     });
   }
 

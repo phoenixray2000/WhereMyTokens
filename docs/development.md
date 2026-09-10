@@ -61,6 +61,10 @@ The [usage accounting contract](usage-accounting.md) defines the current schema 
 - A damaged database is preserved while recovery is attempted. The explicit destructive **Reset index** action is separate from refresh and reconstructs only currently available sources.
 - Dated price revisions run once before collection starts, in a worker using retained request facts. Matching costs and receipts commit atomically after backup and non-cost validation; incomplete sources retain their old estimates. No raw logs are read. The separate lossless repricing CLI can replay to stored checkpoints for explicit maintenance, but neither operation resets usage history or advances checkpoints.
 
+### Historical accounting maintenance
+
+The automatic counter-origin revision runs in a worker serialized with normal scans. Its core is `usageIndex/accountingRevisions.ts`; synthetic raw-evidence, backup, rollback, protected-alias, concurrency, and restart tests live in `scripts/usage-accounting-revision.test.mjs`. The preview/apply CLI calls the same core, not a separate repair implementation. See the [accounting contract](usage-accounting.md#automatic-historical-accounting-revision) for the exact proof and preservation rules.
+
 ### Provider quotas
 
 `ProviderQuotaSnapshot.entries` is the shared quota contract. An entry key identifies one limit and its alert/reset state; `target.id` identifies the related settings and display target. Only reported limits produce entries. Provider snapshots are selected as a whole rather than assembled from windows from different observations.

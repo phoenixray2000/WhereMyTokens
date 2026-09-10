@@ -72,11 +72,11 @@
 
 | Versión | Fecha | Cambios destacados |
 |---------|-------|-------------------|
+| **[v1.24.5](docs/usage-accounting.md#automatic-historical-accounting-revision)** | 2026-09-10 | Compilación local: verifica y corrige sobreconteos históricos de Codex con copias de seguridad, registros reanudables por fuente y detalles con nueva comprobación. |
 | **[v1.24.4](docs/usage-accounting.md)** | 2026-09-10 | Compilación local: corrige costes inflados al mezclar contadores acumulados de hilos y notificaciones de Codex; conserva su origen entre turnos y reinicios. |
 | **[v1.24.3](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.3)** | 27 ago | Detecta los language servers actuales y legacy de Antigravity en Windows, prioriza los shared quota groups de Gemini y Claude/GPT reportados por el provider y conserva el fallback de quota por modelo para servidores antiguos |
 | **[v1.24.2](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.2)** | 10 ago | Avisa cuando el login de Claude vence o es rechazado, abre el login oficial por CLI y reintenta tras cambiar las credentials. Mantiene visible el problema aunque conserve la última quota y no renueva ni escribe credentials |
 | **[v1.24.1](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.1)** | 10 ago | Restaura la quota de Claude Desktop cuando hay credentials de Claude Code pero no un statusLine reciente; mantiene statusLine primero y añade host fijo, cache ligada al auth y pruebas de integridad |
-| **[v1.24.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.0)** | 10 ago | Mueve la quota de Claude al `statusLine` local oficial, elimina el acceso a credenciales OAuth y el sondeo directo de usage, conserva statusLine personalizados y añade snapshots atómicos mínimos con cache consciente del reset |
 
 [→ Historial completo](https://github.com/jeongwookie/WhereMyTokens/releases)
 
