@@ -129,9 +129,17 @@ export function createCodexUsageIndexScanner(
         throw new Error('Codex scanner received an incompatible source');
       }
       const now = options.now?.() ?? Date.now();
-      const start = beginFileScan(filePath, plan, now, options.endOffsetExclusive, options.onValidationBytesRead);
+      // Reject obsolete accounting state as a whole; replay only establishes context
+      // through the retained checkpoint, it never recharges protected history.
+      let checkpoint = plan.checkpoint;
+      if (checkpoint?.resumeState) {
+        try {
+          if (JSON.parse(checkpoint.resumeState)?.accounting?.version !== 4) checkpoint = { ...checkpoint, resumeState: undefined };
+        } catch { checkpoint = { ...checkpoint, resumeState: undefined }; }
+      }
+      const start = beginFileScan(filePath, { ...plan, checkpoint }, now, options.endOffsetExclusive, options.onValidationBytesRead);
       const resume = start.resume;
-      const accounting: CodexAccountingState = resume?.accounting?.version === 2
+      const accounting: CodexAccountingState = resume?.accounting?.version === 4
         ? resume.accounting : newCodexAccountingState(start.generation);
       accounting.generation = start.generation;
       const snapshot = resume?.snapshot ? cloneSessionSnapshot(resume.snapshot) : restoredSnapshot(plan.previousSessionProjection);

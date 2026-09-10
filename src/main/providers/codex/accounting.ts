@@ -5,7 +5,13 @@ export type TokenVector = [number, number, number, number];
 export const CODEX_RECENT_OBSERVATIONS = 128;
 
 export interface CodexAccountingState {
-  version: 2;
+  version: 4;
+  notificationOffset: TokenVector | null;
+  notificationRawTotal: TokenVector | null;
+  notificationTurnId: string;
+  detailedTotal: TokenVector | null;
+  detailedTurnTotal: TokenVector | null;
+  detailedTurnId: string;
   generation: number;
   lastEntryId: string | null;
   notificationTotal: TokenVector | null;
@@ -33,7 +39,7 @@ export interface CodexUsageDecision {
 }
 
 export function newCodexAccountingState(generation = 0): CodexAccountingState {
-  return { version: 2, generation, lastEntryId: null, notificationTotal: null, sessionId: '', createdMs: 0, forked: false, turnId: '',
+  return { version: 4, notificationOffset: null, notificationRawTotal: null, notificationTurnId: '', detailedTotal: null, detailedTurnTotal: null, detailedTurnId: '', generation, lastEntryId: null, notificationTotal: null, sessionId: '', createdMs: 0, forked: false, turnId: '',
     inherited: false, mode: 'unset', total: null, segment: 0, freshOutput: false, recent: [] };
 }
 
@@ -91,9 +97,50 @@ export function codexUsageDecision(
   if (!structured && !(object.type === 'event_msg' && p.type === 'token_count')) return null;
   const info = p.info as Record<string, unknown> | undefined;
   const last = usageVector(structured ? p.usage : info?.last_token_usage);
-  const total = usageVector(structured ? p.thread_token_usage : info?.total_token_usage);
+  let total = usageVector(structured ? p.thread_token_usage : info?.total_token_usage);
+  const turnTotal = structured ? usageVector(p.turn_token_usage) : null;
   const responseId = structured && typeof p.response_id === 'string' && p.response_id
     ? 'codex:response:' + p.response_id : null;
+  const responseOwner = responseId ? identitySource(responseId) : undefined;
+  const alreadyExecuted = !!responseId && (state.recent.includes(responseId) || !!responseOwner);
+  const coveredReplay = alreadyExecuted && total && state.total
+    && total[0] <= state.total[0] && total[2] <= state.total[2];
+  const coveredDetail = total && state.detailedTotal
+    && total[0] <= state.detailedTotal[0] && total[2] <= state.detailedTotal[2];
+  // Notifications can retain a process-local counter across turns or restart at a
+  // turn boundary. Establish its origin only from an exact explicit scope match.
+  // A task_started event alone is not evidence that this counter reset.
+  if (structured && total && turnTotal && !coveredReplay && !coveredDetail) {
+    const raw = state.notificationRawTotal;
+    if (raw && state.notificationTotal && typeof p.turn_id === 'string' && p.turn_id
+      && p.turn_id === state.notificationTurnId && (same(raw, turnTotal) || same(raw, total))) {
+      const offset = total.map((n, i) => n - raw[i]) as TokenVector;
+      if (offset.every(n => n >= 0)) {
+        if (state.total && same(state.total, state.notificationTotal)) state.total = total;
+        state.notificationTotal = total;
+        state.notificationOffset = offset;
+      }
+    }
+    state.detailedTotal = total;
+    state.detailedTurnTotal = turnTotal;
+    state.detailedTurnId = typeof p.turn_id === 'string' ? p.turn_id : '';
+  } else if (!structured && total) {
+    const raw = total;
+    if (state.detailedTotal && state.detailedTurnTotal
+      && (state.detailedTurnId !== '' && state.turnId === state.detailedTurnId && same(raw, state.detailedTurnTotal)
+        || same(raw, state.detailedTotal))) {
+      const offset = state.detailedTotal.map((n, i) => n - raw[i]) as TokenVector;
+      if (offset.every(n => n >= 0)) state.notificationOffset = offset;
+    }
+    // Without a proven origin this notification cannot be subtracted from a
+    // thread counter. Leave the thread baseline intact; a later detailed
+    // cumulative record includes intervening usage even if individual details
+    // were omitted. Do not invent an offset from similarly sized observations.
+    if (state.detailedTotal && state.detailedTurnTotal && !state.notificationOffset) return null;
+    state.notificationRawTotal = raw;
+    state.notificationTurnId = state.turnId;
+    if (state.notificationOffset) total = raw.map((n, i) => n + state.notificationOffset![i]) as TokenVector;
+  }
   const origin = 'codex:session:' + (state.sessionId || sourceId);
   // This identifies a replayed provider observation, not equal-sized independent single requests.
   const observedTime = typeof object.timestamp === 'string' && Number.isFinite(Date.parse(object.timestamp))
@@ -138,8 +185,6 @@ export function codexUsageDecision(
     return responseId ? link(observationKey) : null;
   }
   if (!responseId && repeated(observationKey)) return null;
-  const responseOwner = responseId ? identitySource(responseId) : undefined;
-  const alreadyExecuted = !!responseId && (state.recent.includes(responseId) || !!responseOwner);
   if (responseOwner && responseOwner !== sourceId) {
     // A copied execution advances only a forward baseline; it never adds the same usage twice.
     if (total && (!state.total || total[0] >= state.total[0] && total[2] >= state.total[2])) {
@@ -164,7 +209,10 @@ export function codexUsageDecision(
       const covered = total[0] <= previous[0] && total[2] <= previous[2];
       const primaryProgress = !notificationPrevious
         || total[0] >= notificationPrevious[0] && total[2] >= notificationPrevious[2];
-      if (covered && (structured && notificationPrevious || !structured && primaryProgress && !state.freshOutput)) {
+      const coveredByThread = !structured && state.notificationOffset && state.detailedTotal
+        && total[0] <= state.detailedTotal[0] && total[2] <= state.detailedTotal[2];
+      if (covered && (coveredByThread || structured && notificationPrevious || !structured && primaryProgress
+        && (!state.freshOutput || !!notificationPrevious && same(total, notificationPrevious)))) {
         if (!structured) state.notificationTotal = total;
         return link(state.lastEntryId);
       }

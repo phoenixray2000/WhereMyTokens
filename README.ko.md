@@ -73,11 +73,11 @@
 
 | 버전 | 날짜 | 주요 변경 |
 |------|------|---------|
+| **[v1.24.4](docs/usage-accounting.md)** | 2026-09-10 | 로컬 빌드: Codex 스레드 및 알림 누적 카운터 혼용으로 발생한 비용 과대 집계를 수정하고 턴 전환과 재시작 시 기준을 유지합니다. |
 | **[v1.24.3](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.3)** | 8/27 | Windows에서 현재·legacy Antigravity language server를 모두 탐지하고, provider가 보고한 shared Gemini 및 Claude/GPT quota group을 우선 표시하며 이전 서버의 모델별 quota fallback을 유지 |
 | **[v1.24.2](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.2)** | 8/10 | Claude 로그인 만료·거절을 알림과 앱 내 액션으로 안내하고 공식 CLI 로그인을 열며, credential 변경 후 자동 재시도합니다. 이전 quota를 유지해도 로그인 문제를 숨기지 않고 credential 갱신·쓰기는 하지 않습니다 |
 | **[v1.24.1](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.1)** | 8/10 | 기존 Claude Code credential은 있지만 최신 statusLine이 없는 Claude Desktop 사용에서 quota를 복구하고, 공식 statusLine 우선·token refresh/write 제거·Anthropic 고정 호스트·auth-bound cache·무변조 테스트를 적용 |
 | **[v1.24.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.0)** | 8/10 | Claude quota를 공식 로컬 `statusLine`으로 전환하고, Claude OAuth credential 접근과 직접 usage polling을 제거하며, custom statusLine 보존과 최소화된 atomic snapshot·reset-aware cache를 추가 |
-| **[v1.23.2](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.23.2)** | 8/8 | Claude와 GPT-5.6의 모델별·시점별 API 환산 가격을 바로잡고, 검증된 백업·checkpoint 제한 replay·동시 변경 감지·privacy-safe CLI를 갖춘 무손실 SQLite 비용 재산정을 추가 |
 
 [→ 전체 변경 이력](https://github.com/jeongwookie/WhereMyTokens/releases)
 

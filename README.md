@@ -83,11 +83,11 @@ Japanese UI is built into the Windows app. It follows your system language by de
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **[v1.24.4](docs/usage-accounting.md)** | 2026-09-10 | Local build: fix Codex cost inflation caused by mixed thread and notification counters; preserve counter origins across turns and restarts. |
 | **[v1.24.3](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.3)** | Aug 27 | Restore Antigravity 2.x detection on Windows and show provider-reported shared Gemini and Claude/GPT quota groups with safe legacy per-model fallback |
 | **[v1.24.2](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.2)** | Aug 10 | Add actionable Claude login recovery with a one-time Windows notification, the official CLI login flow, credential-change auto-retry, and stale-quota preservation without refreshing or writing credentials |
 | **[v1.24.1](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.1)** | Aug 10 | Restore Claude quota when Claude Desktop is active and existing Claude Code credentials are available, even without fresh statusLine data; keep official statusLine first and remove all token refresh/write behavior |
 | **[v1.24.0](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.24.0)** | Aug 10 | Move Claude quota tracking to the official local `statusLine` feed, remove direct Claude OAuth credential access and usage polling, preserve custom status lines, and add minimized atomic snapshots with reset-aware caching |
-| **[v1.23.2](https://github.com/jeongwookie/WhereMyTokens/releases/tag/v1.23.2)** | Aug 8 | Correct model-specific API-equivalent pricing across Claude and GPT-5.6 price changes, and add lossless SQLite cost repricing with validated backups, checkpoint-bounded replay, concurrent-change protection, and privacy-safe CLI output |
 
 [Full changelog](https://github.com/jeongwookie/WhereMyTokens/releases)
 

@@ -23,6 +23,47 @@ const total = (n, last = n, at = n, extra = {}) => ({ type: 'event_msg', timesta
 const detail = (id, n, cumulative, at = n) => ({ type: 'token_usage_record', timestamp: stamp(at), payload: {
   ...(id ? { response_id: id } : {}), thread_id: 'sample', usage: vector(n), ...(cumulative === undefined ? {} : { thread_token_usage: vector(cumulative) }),
 } });
+
+test('Turn-local notifications never rewind thread totals, including repeated notifications and restart cuts', async t => {
+  const d = (id, usage, thread, turn, at) => ({ type: 'token_usage_record', timestamp: stamp(at),
+    payload: { response_id: id, turn_id: 'turn-a', usage, thread_token_usage: thread, turn_token_usage: turn } });
+  const a = vector(299517,298880,126,31), b = vector(300553,292224,879,856);
+  const notice = total(0,0,3,{ total_token_usage: vector(10824910,10718592,20096,9510), last_token_usage:a });
+  const records = [meta({model:'gpt-6-astra'}),
+    {type:'event_msg',timestamp:stamp(0),payload:{type:'task_started',turn_id:'turn-a'}},
+    d('a',a,vector(336109005,328446336,1397754,591381),vector(10824910,10718592,20096,9510),1),
+    notice, {type:'response_item',timestamp:stamp(4),payload:{type:'function_call',name:'exec',arguments:'{}'}},
+    {...notice,timestamp:stamp(5)},
+    d('b',b,vector(336409558,328738560,1398633,592237),vector(11125463,11010816,20975,10366),6)];
+  for (let cut=1;cut<records.length;cut++) {
+    const f=fixture(t,'codex',true);f.write(records.slice(0,cut));await f.refresh();await f.restart();
+    f.append(records.slice(cut));await f.refresh();
+    assert.deepEqual((await f.entries()).map(e=>[e.inputTokens,e.cacheReadTokens,e.outputTokens]),[[637,298880,126],[8329,292224,879]],'cut '+cut);
+    assert.ok(Math.abs((await f.metrics()).costUSD - (0.61995+0.816953))<1e-9);
+  }
+});
+
+test('Notification origin survives a new turn unless the notification actually resets', async t => {
+  for (const reset of [false,true]) {
+    const f=fixture(t,'codex',true);
+    const d=(id,n,thread,turn,at)=>({...detail(id,n,thread,at),payload:{...detail(id+'-'+at,n,thread,at).payload,turn_id:id,turn_token_usage:vector(turn)}});
+    f.write([meta(),{type:'event_msg',timestamp:stamp(0),payload:{type:'task_started',turn_id:'a'}},d('a',100,1100,100,1),total(100,100,2)]);await f.refresh();await f.restart();
+    f.append([{type:'event_msg',timestamp:stamp(3),payload:{type:'task_started',turn_id:'b'}},
+      d('b',50,1150,50,4),total(reset?50:150,50,5),
+      {type:'response_item',timestamp:stamp(6),payload:{type:'function_call',name:'exec'}},
+      total(reset?50:150,50,7), d('b',25,1175,75,8),total(reset?75:175,25,9)]);
+    await f.refresh();assert.equal((await f.metrics()).totalTokens,175,'reset='+reset);
+  }
+});
+
+test('A turn notification arriving before its detailed counterpart establishes the same origin', async t => {
+  const f=fixture(t,'codex',true);
+  f.write([meta(),{type:'event_msg',timestamp:stamp(0),payload:{type:'task_started',turn_id:'turn'}},total(100,100,1)]);await f.refresh();await f.restart();
+  const row=detail('first',100,1100,2);row.payload.turn_token_usage=vector(100);row.payload.turn_id='turn';
+  const next=detail('next',50,1150,4);next.payload.turn_token_usage=vector(150);next.payload.turn_id='turn';
+  f.append([row,total(150,50,3),next]);await f.refresh();
+  assert.equal((await f.metrics()).totalTokens,150);
+});
 const claude = (id, n, extra = {}) => ({ type: 'assistant', timestamp: stamp(1), uuid: id ? 'origin-' + id : undefined,
   message: { ...(id ? { id } : {}), model: 'claude-sonnet-4', usage: { input_tokens: n, output_tokens: 0 }, content: [] }, ...extra });
 
@@ -38,7 +79,7 @@ function fixture(t, provider = 'codex', sqlite = false) {
   const scanner = provider === 'codex' ? codexModule.createCodexUsageIndexScanner : claudeModule.createClaudeUsageIndexScanner;
   const descriptor = () => {
     const s = fs.statSync(file);
-    return { sourceId, provider, kind: 'file', parserVersion: 5, version: { token: s.size + ':' + s.mtimeMs, size: s.size, mtimeMs: s.mtimeMs } };
+    return { sourceId, provider, kind: 'file', parserVersion: provider === 'codex' ? 7 : 5, version: { token: s.size + ':' + s.mtimeMs, size: s.size, mtimeMs: s.mtimeMs } };
   };
   t.after(async () => {
     await index.close();
@@ -442,4 +483,53 @@ test('Fractional file modification times remain valid for empty projections and 
     assert.equal(stored.checkpoint.fallbackTimestampMs,T);
     for(const e of await f.entries()) assert.ok(Number.isInteger(e.timestampMs));
   }
+});
+
+test('Obsolete Codex resume state bootstraps at the protected checkpoint before new usage', async t => {
+  const f=fixture(t,'codex',true);
+  f.write([meta(),total(100,100,1)]);await f.refresh();await f.index.close();
+  const db=new DatabaseSync(f.dbFile);
+  const checkpoint=JSON.parse(db.prepare('SELECT checkpoint_json FROM usage_source WHERE source_id=?').get(f.sourceId).checkpoint_json);
+  const resume=JSON.parse(checkpoint.resumeState);resume.accounting.version=2;resume.accounting.total=[99999999,0,0,0];
+  checkpoint.resumeState=JSON.stringify(resume);db.prepare('UPDATE usage_source SET checkpoint_json=? WHERE source_id=?').run(JSON.stringify(checkpoint),f.sourceId);db.close();
+  await f.restart();f.append([total(150,50,2)]);await f.refresh();
+  assert.equal((await f.metrics()).totalTokens,150);
+  assert.equal(JSON.parse((await f.storage.getSource(f.sourceId)).checkpoint.resumeState).accounting.version,4);
+});
+
+test('Equal-sized independent turns are not mistaken for a notification/detail pair', async t => {
+  const f=fixture(t,'codex',true);
+  const records=[meta()];
+  for(let i=1;i<=2;i++){
+    records.push({type:'event_msg',timestamp:stamp(i*10),payload:{type:'task_started',turn_id:'turn-'+i}});
+    const row=detail('response-'+i,100,1000+i*100,i*10+1);row.payload.turn_id='turn-'+i;row.payload.turn_token_usage=vector(100);
+    records.push(row,total(100,100,i*10+2));
+  }
+  f.write(records);await f.refresh();assert.equal((await f.metrics()).totalTokens,200);
+});
+
+test('Unpaired notifications cannot replace an established thread baseline', async t => {
+  const f=fixture(t,'codex',true);
+  const d=(id,n,thread,turn,at)=>({...detail(id,n,thread,at),payload:{...detail(id,n,thread,at).payload,turn_id:'a',turn_token_usage:vector(turn)}});
+  f.write([meta(),{type:'event_msg',timestamp:stamp(0),payload:{type:'task_started',turn_id:'a'}},
+    d('first',100,1100,100,1),{type:'response_item',timestamp:stamp(2),payload:{type:'function_call',name:'exec'}},total(150,50,3)]);
+  await f.refresh();await f.restart();f.append([d('third',50,1200,200,4)]);await f.refresh();
+  assert.equal((await f.metrics()).totalTokens,200);
+});
+
+test('Known detailed replay cannot change counter origin before identity deduplication', async t => {
+  const f=fixture(t,'codex',true);
+  const d=(id,n,thread,turn,at)=>({...detail(id,n,thread,at),payload:{...detail(id,n,thread,at).payload,turn_id:'a',turn_token_usage:vector(turn)}});
+  const first=d('first',100,1100,100,1);
+  f.write([meta(),{type:'event_msg',timestamp:stamp(0),payload:{type:'task_started',turn_id:'a'}},first,total(100,100,2),d('second',1000,2100,1100,3),total(1100,1000,4)]);
+  await f.refresh();await f.restart();f.append([first,d('third',100,2200,1200,5)]);await f.refresh();
+  assert.equal((await f.metrics()).totalTokens,1200);
+});
+
+test('Previously unseen delayed details cannot rebase an already covered thread interval', async t => {
+  const f=fixture(t,'codex',true);
+  const d=(id,n,thread,turn,at)=>({...detail(id,n,thread,at),payload:{...detail(id,n,thread,at).payload,turn_id:'a',turn_token_usage:vector(turn)}});
+  f.write([meta(),{type:'event_msg',timestamp:stamp(0),payload:{type:'task_started',turn_id:'a'}},d('first',100,1100,100,1),total(100,100,2),d('second',1000,2100,1100,3),total(1100,1000,4)]);
+  await f.refresh();await f.restart();f.append([d('late-unseen',50,1100,100,5),d('third',100,2200,1200,6)]);await f.refresh();
+  assert.equal((await f.metrics()).totalTokens,1200);
 });
