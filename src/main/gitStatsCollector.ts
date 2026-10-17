@@ -314,19 +314,37 @@ export function aggregateDailyAllStats(statsList: Array<{ dailyAll?: GitDailySta
   return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
+const MAX_CONCURRENT_GIT_COMMANDS = 2;
+let activeGitCommands = 0;
+const gitCommandWaiters: Array<() => void> = [];
+
+async function runGitCommand<T>(command: () => Promise<T>): Promise<T> {
+  await new Promise<void>(resolve => {
+    const start = () => { activeGitCommands++; resolve(); };
+    if (activeGitCommands < MAX_CONCURRENT_GIT_COMMANDS) start();
+    else gitCommandWaiters.push(start);
+  });
+  try {
+    return await command();
+  } finally {
+    activeGitCommands--;
+    gitCommandWaiters.shift()?.();
+  }
+}
+
 function execGitAsync(args: string[], cwd: string, timeout = 5000): Promise<string> {
-  return new Promise((resolve, reject) => {
+  return runGitCommand(() => new Promise((resolve, reject) => {
     execFile('git', args, { cwd, timeout, encoding: 'utf-8' }, (err, stdout) => {
       if (err) reject(err);
       else resolve((stdout ?? '').trim());
     });
-  });
+  }));
 }
 
 // Retain only parsed aggregates, never the complete Git log. Resolve only after
 // successful exit, so a killed or failed process cannot publish partial history.
 export function execGitLines(args: string[], cwd: string, accept: (line: string) => void, timeout = 30000): Promise<void> {
-  return new Promise((resolve, reject) => {
+  return runGitCommand(() => new Promise((resolve, reject) => {
     const child = spawn('git', args, { cwd, timeout, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
     let failure: Error | undefined;
@@ -348,7 +366,7 @@ export function execGitLines(args: string[], cwd: string, accept: (line: string)
       else if (code !== 0 || signal) reject(new Error(`Git ${args[0]} failed (${signal ?? code}): ${stderr.trim()}`));
       else resolve();
     });
-  });
+  }));
 }
 
 async function countGitLines(args: string[], cwd: string, timeout: number): Promise<number> {

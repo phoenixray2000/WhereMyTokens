@@ -50,6 +50,10 @@ WhereMyTokens is an Electron tray app. The renderer never reads local files or c
 | `statusLine` bridge | Receives Claude Code JSON on stdin and writes a local bridge snapshot for the main process. |
 | Claude compatibility fetcher | Uses a fresh statusLine first; otherwise reads the existing Claude Code access token in the main process and sends a throttled, fixed-host quota request without refresh or credential writes. |
 
+### Git statistics
+
+Git statistics share a FIFO limit of two active Git commands across repositories and refresh callers, including buffered commands and streamed history. A command holds its slot until it finishes; queue time does not consume its execution timeout.
+
 ### Usage history
 
 The [usage accounting contract](usage-accounting.md) defines the current schema 6 quantities, identities, migrations, and scan states. Provider discovery and scanners feed the same UsageIndex; the in-memory and SQLite adapters implement its storage contract. Session projections accelerate display and do not form another historical authority.
