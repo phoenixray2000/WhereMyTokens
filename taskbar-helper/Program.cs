@@ -137,11 +137,11 @@ internal sealed class TaskbarQuotaForm : Form
         "layout.json");
     private readonly TaskbarQuotaCanvas _canvas = new() { Dock = DockStyle.Fill };
     private Size _taskbarClientSize = Size.Empty;
+    private int? _rightAnchor;
     private float _dpiScale = 1f;
     private Color TransparentKey { get; set; } = DarkTransparentKey;
     private bool _dragging;
     private bool _movedDuringDrag;
-    private bool _suppressNextClick;
     private Point _dragStartMouse;
     private Point _dragStartLocation;
 
@@ -231,7 +231,9 @@ internal sealed class TaskbarQuotaForm : Form
             : Math.Min(Math.Max(Scaled(48), taskbarHeight / 5), Math.Max(Scaled(48), taskbarHeight - Scaled(8)));
         var defaultX = horizontal ? Math.Max(0, taskbarWidth - width - Scaled(DefaultRightReserve)) : Math.Max(0, (taskbarWidth - width) / 2);
         var defaultY = horizontal ? Math.Max(0, (taskbarHeight - height) / 2) : Math.Max(0, taskbarHeight - height - Scaled(160));
-        var x = saved?.X ?? defaultX;
+        var x = horizontal && _rightAnchor is int right
+            ? right - width
+            : saved?.X ?? defaultX;
         var y = saved?.Y ?? defaultY;
         var point = ClampLocation(new Point(x, y), new Size(width, height), new Size(taskbarWidth, taskbarHeight));
         return new Rectangle(point, new Size(width, height));
@@ -265,14 +267,16 @@ internal sealed class TaskbarQuotaForm : Form
             taskbarHeight,
             LoadLayoutState(),
             PreferredWidthForTaskbar(taskbarWidth, preferredContentWidth));
+        _rightAnchor ??= bounds.Right;
         if (bounds.Location == Location && bounds.Size == Size) return;
 
         Native.MoveWindow(Handle, bounds.X, bounds.Y, bounds.Width, bounds.Height, true);
+        SaveLayoutState(new LayoutState(bounds.X, bounds.Y));
     }
 
     private void WireInteractive(Control control)
     {
-        control.Click += OnOpenDashboard;
+        control.MouseDoubleClick += OnOpenDashboard;
         control.MouseDown += BeginDrag;
         control.MouseMove += DragMove;
         control.MouseUp += EndDrag;
@@ -281,7 +285,7 @@ internal sealed class TaskbarQuotaForm : Form
 
     private void BeginDrag(object? sender, MouseEventArgs e)
     {
-        if (e.Button != MouseButtons.Left) return;
+        if (e.Button != MouseButtons.Left || e.Clicks > 1) return;
         _dragging = true;
         _movedDuringDrag = false;
         _dragStartMouse = Control.MousePosition;
@@ -304,9 +308,9 @@ internal sealed class TaskbarQuotaForm : Form
         if (!_dragging) return;
         _dragging = false;
         Capture = false;
-        _suppressNextClick = _movedDuringDrag;
         if (_movedDuringDrag)
         {
+            _rightAnchor = Right;
             SaveLayoutState(new LayoutState(Location.X, Location.Y));
             var isLight = SampleBackgroundIsLight() ?? _canvas.BackgroundIsLight;
             ApplyTransparentKey(isLight);
@@ -314,13 +318,9 @@ internal sealed class TaskbarQuotaForm : Form
         }
     }
 
-    private void OnOpenDashboard(object? sender, EventArgs e)
+    private void OnOpenDashboard(object? sender, MouseEventArgs e)
     {
-        if (_suppressNextClick)
-        {
-            _suppressNextClick = false;
-            return;
-        }
+        if (e.Button != MouseButtons.Left || _movedDuringDrag) return;
         Program.WriteEvent("open-dashboard");
     }
 
@@ -468,6 +468,8 @@ internal sealed class TaskbarQuotaCanvas : Control
             ControlStyles.AllPaintingInWmPaint |
             ControlStyles.OptimizedDoubleBuffer |
             ControlStyles.ResizeRedraw |
+            ControlStyles.StandardClick |
+            ControlStyles.StandardDoubleClick |
             ControlStyles.UserPaint,
             true);
         BackColor = TransparentKey;

@@ -125,7 +125,7 @@ macOS 用户请使用单独的公开仓库:
 
 ### 速率限制与提醒
 - **Provider quota 条** — Claude、Codex、Antigravity 以及后续 provider 都会把 provider 报告的 limit 转成 `providerQuotas` 中的 canonical Quota Entry；Claude 优先使用官方 `statusLine`，没有新值时通过现有 Claude Code access token 的只读 Desktop compatibility request 获取 5h/7d 与实际报告的 model-scoped entry。Codex 使用 live usage snapshot 与 local-log fallback、reset-credit endpoint 与 auth-bound cache，Antigravity 使用运行中 IDE 的 127.0.0.1 local RPC model quota entry。未报告的 limit 不再合成为 `Unlimited`，而是保持缺席状态
-- **按 target 配置 quota 展示** — 每个 canonical quota target 都可以在 Settings 中设为 Rich、Simple 或隐藏；设置会影响 Plan Usage、悬浮小部件和 taskbar mini 的显示顺序与可见性。Taskbar mini 将规范化的 5h/7d entry 放入两条 physical line，可配置每条 line 1-3 个块，并用 `+N` 标示隐藏 target；前缀颜色表示 live/cache/log 等数据 source/status，而不是 quota severity。Codex Resets target 仅用于 Plan Usage
+- **按 target 配置 quota 展示** — 每个 canonical quota target 都可以在 Settings 中设为 Rich、Simple 或隐藏；设置会影响 Plan Usage、悬浮小部件和 taskbar mini 的显示顺序与可见性。Taskbar mini 将规范化的 5h/7d entry 放入两条 physical line，可配置每条 line 1-3 个块，并用 `+N` 标示隐藏 target；前缀颜色表示 live/cache/log 等数据 source/status，而不是 quota severity。指标数量变化时固定右边缘，向左扩展或收缩；拖动可调整位置，双击文字可打开主界面。Codex Resets target 仅用于 Plan Usage
 - **Quota Pace 视图** — 对比已用额度 % 与已过时间 %，黄色/红色表示使用节奏快于重置窗口
 - **Claude Code 桥接** — 优先通过 `statusLine` 接收官方本地数据；没有新值且存在 Claude Code credential 时由受限的只读 compatibility request 补充
 - **Claude 重新登录提示** — 登录过期或被拒绝时显示一次 Windows 通知和应用内操作，并打开官方 `claude auth login` 流程。credential 变更后自动重试；WMT 本身不会刷新 token 或写入 credential
